@@ -30,14 +30,14 @@ def send_callback(future, sender):
     sender.send(result_data)
     logger.info(f"Task {task_id} result was sent back to the executor")
 
-def worker_task(receiver, sender, timeout):
+def worker_task(receiver, sender, timeout, max_workers):
     """Worker function to process tasks received over ZeroMQ with auto-termination."""
     logger.info("Worker started and waiting for tasks")
     futures = []
     poller = zmq.Poller()
     poller.register(receiver, zmq.POLLIN)  # Listen for incoming message
     last_task_time = time.time()
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         try:
             while True:
                 events = poller.poll(timeout*1000) # Timeout is passed as parameter as seconds
@@ -74,15 +74,30 @@ def worker_task(receiver, sender, timeout):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 4:
-        print("Usage: python worker.py <input_address> <output_address> <timeout>")
+    if len(sys.argv) != 6:
+        print("Usage: python worker.py <input_address> <output_address> <ack_address> <timeout> <max_workers>")
         sys.exit(1)
 
-    input_address = sys.argv[1]
-    output_address = sys.argv[2]
-    timeout = int(sys.argv[3])  # Timeout in seconds
+    input_address = sys.argv[1]     # e.g., tcp://<executor>:5555
+    output_address = sys.argv[2]    # e.g., tcp://<executor>:5556
+    ack_address = sys.argv[3]       # e.g., tcp://<executor>:5560
+    timeout = int(sys.argv[4])
+    max_workers = int(sys.argv[5])
+
+    # Socket para receber tarefas
     receiver = context.socket(zmq.PULL)
     receiver.connect(input_address)
+
+    # Socket para enviar resultados
     sender = context.socket(zmq.PUSH)
     sender.connect(output_address)
-    worker_task(receiver, sender, timeout)
+
+    # Novo socket para enviar ACK de prontidão
+    ack_sender = context.socket(zmq.PUSH)
+    ack_sender.connect(ack_address)
+    logger.info(f"Enviando ACK de prontidão para {ack_address}")
+    ack_sender.send_string("ready")
+    ack_sender.close()
+
+    # Inicia o loop principal do worker
+    worker_task(receiver, sender, timeout, max_workers)

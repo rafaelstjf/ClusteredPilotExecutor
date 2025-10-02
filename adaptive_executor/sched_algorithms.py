@@ -54,7 +54,7 @@ def __calc_upward_rank(node, dag):
         max_ = 0
         for suc in dag.neighbors(node):
             c_node_suc = 0 # Communication cost is considered zero
-            rank_suc = __calc_upward_rank(suc)
+            rank_suc = __calc_upward_rank(suc, dag)
             max_ = max(rank_suc + c_node_suc, max_)
         return w_node + max_
     
