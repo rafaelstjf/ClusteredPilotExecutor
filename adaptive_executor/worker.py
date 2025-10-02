@@ -78,26 +78,26 @@ if __name__ == "__main__":
         print("Usage: python worker.py <input_address> <output_address> <ack_address> <timeout> <max_workers>")
         sys.exit(1)
 
-    input_address = sys.argv[1]     # e.g., tcp://<executor>:5555
-    output_address = sys.argv[2]    # e.g., tcp://<executor>:5556
-    ack_address = sys.argv[3]       # e.g., tcp://<executor>:5560
+    input_address = sys.argv[1]
+    output_address = sys.argv[2]
+    ack_address = sys.argv[3]
     timeout = int(sys.argv[4])
     max_workers = int(sys.argv[5])
 
-    # Socket para receber tarefas
+    # Socket to receive tasks
     receiver = context.socket(zmq.PULL)
     receiver.connect(input_address)
 
-    # Socket para enviar resultados
+    # Socket to send tasks
     sender = context.socket(zmq.PUSH)
     sender.connect(output_address)
 
-    # Novo socket para enviar ACK de prontidão
+    # Socket to send the ready ACK
     ack_sender = context.socket(zmq.PUSH)
     ack_sender.connect(ack_address)
     logger.info(f"Enviando ACK de prontidão para {ack_address}")
     ack_sender.send_string("ready")
     ack_sender.close()
 
-    # Inicia o loop principal do worker
+    # Start the main loop
     worker_task(receiver, sender, timeout, max_workers)

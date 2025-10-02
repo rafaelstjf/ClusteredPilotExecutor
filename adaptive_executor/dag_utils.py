@@ -1,8 +1,6 @@
-import sqlite3
+import sqlite3, logging, os
 import pandas as pd
 import networkx as nx
-import logging
-import os
 import matplotlib.pyplot as plt
 
 logging.basicConfig(level=logging.INFO)
@@ -118,10 +116,10 @@ def hierarchy_pos(G, root, levels=None, width=1., height=1.):
     vert_gap = height / (max([l for l in levels])+1)
     return make_pos({})
 
-def draw_dag(dag):
+def draw_dag(dag, dir):
     pos = hierarchy_pos(dag, root = 0)
     fig, ax = plt.subplots()
     nx.draw_networkx(dag, pos=pos, ax=ax)
     ax.set_title("DAG layout in topological order")
     fig.tight_layout()
-    fig.savefig("/scratch/cenapadrjsd/rafael.terra2/HP2NET/HP2NET_development/dag.png", dpi=300)
+    fig.savefig(os.path.join(dir, "dag.png"), dpi=300)
