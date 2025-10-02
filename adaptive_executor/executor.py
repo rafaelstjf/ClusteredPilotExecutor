@@ -1,9 +1,11 @@
-import zmq, pickle, logging, time, os, uuid, sqlite3
+import zmq, pickle, logging, time, os, uuid
 from datetime import datetime, timedelta
-from parsl.executors.base import ParslExecutor
 from threading import Thread, Lock, Event
 from concurrent.futures import Future
 from typing import Callable, Any, Optional, Tuple
+from enum import Enum, auto
+
+from parsl.executors.base import ParslExecutor
 from parsl.serialize import pack_apply_message
 from parsl.serialize.errors import SerializationError
 from parsl.addresses import address_by_hostname
@@ -17,93 +19,99 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 DEFAULT_LAUNCH_CMD = "python -m parsl.executors.adaptive_executor.worker tcp://{hostname}:{push_port} tcp://{hostname}:{pull_port} tcp://{hostname}:{ack_port} {timeout} {max_workers}"
-FIFO = 0
-LIFO = 1
-GREEDY = 2
-GREED_MIN = 3
-GREEDY_UNLIMITED = 4
-HEFT_GREEDY = 5
+class ClusteringAlgorithm(Enum):
+    FIFO = auto()
+    LIFO = auto()
+    GREEDY = auto()
+    GREED_MIN = auto()
+    GREEDY_UNLIMITED = auto()
+    HEFT_GREEDY = auto()
 
-class SlurmCExecutor(ParslExecutor):
+
+class AdaptiveExecutor(ParslExecutor):
     radio_mode: str = "filesystem"
     def __init__(
             self,
             label: str = "AdaptiveExecutor",
+            provider: ExecutionProvider = SlurmProvider(),
+            port_range: Optional[Tuple[int, int]] = (55000, 56000),
+            address: Optional[str] = address_by_hostname(),
             process_timeout: Optional[int] = 3,
-            max_jobs: Optional[int] = 1,
             working_dir: Optional[str] = None,
-            provider: Optional[ExecutionProvider] = None,
-            port_range: Tuple[int, int] | None = (55000, 56000),
-            clustering_alg: Optional[int] = GREEDY,
+            clustering_alg: Optional[ClusteringAlgorithm] = ClusteringAlgorithm.GREEDY,
             allow_tasks: Optional[bool] = False
             ):
-        """
-            TODO:
-                - The address needs to be passed as parameter in the future
-        """
         super().__init__()
-        # Set slurmprovider as default provider to check statuses instead of using a custom function to it
-        if provider is None:
-            provider = SlurmProvider()
-        self.provider = provider
+
+        # General variables
         self.label = label
-        self.port_range = port_range
-        logger.warning(f"{self.radio_mode}")
+        self.provider = provider
         if working_dir is None:
             working_dir = self.label + str(uuid.uuid4())
         self.working_dir = os.path.abspath(working_dir)
-        self.address = address_by_hostname()
+
+        # Network variables
+        self.port_range = port_range
+        self.address = address
+
+        # Parameters variables
         self.clustering_alg = clustering_alg
-        logger.debug(self.address)
-        # Setting all the variables used on ZMQ
+        self.timer = process_timeout  # Timer used to wait for new tasks
+        self.process_timeout = process_timeout # Used to reset the timer
+        self.allow_tasks = allow_tasks
+
+        # Socket variables
         self.context = zmq.Context()
-        self.dag = None
         self.send_task_socket = self.context.socket(zmq.PUSH)
         self.push_port = self.send_task_socket.bind_to_random_port(f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
         self.receive_task_socket = self.context.socket(zmq.PULL)
         self.pull_port = self.receive_task_socket.bind_to_random_port(f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
         self.ack_socket = self.context.socket(zmq.PULL) # Port to receive the ack when sending tasks
         self.ack_port = self.ack_socket.bind_to_random_port(f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
+        
+        # Internal variables
+        self.dag = None
         self.tasks = {}  # Stores the status of the tasks
         self.launched_tasks = 0  # Number of launched tasks
         self.queue = list()  # Task queue
         self.future_tasks = {}  # Stores the future objects returned when submited
-        self.lock = Lock()  # Thread lock
-        self.timer = process_timeout  # Timer used to wait for new tasks
-        self.process_timeout = process_timeout
-        self.timer_thread = None
-        self.max_jobs = max_jobs
-        self.current_jobs = list()
-        self.stop_event = Event()
+        self.max_jobs = 1 #TODO: enable more than 1 job per time
         self.job_mon_interval = 30
         self.job_start_time = None
-        self.allow_tasks = allow_tasks
+
+        # Thread variables
+        self.lock = Lock()  # Thread lock
+        self.timer_thread = None
+        self.current_jobs = list()
+        self.stop_event = Event()
+
     def monitor_resources(self) -> bool:
         return True
 
     def __send_tasks(self, cluster: list, send_ack = True) -> None:
         """Send tasks to the workers asynchronously."""
-        #TODO: change it to check if the first task was received
-        # Espera bloqueante por uma única mensagem do worker
+
+        # Blocking wait for the worker ack
         if send_ack:
             ACK_TIMEOUT_MS = 120_000
             try:
-                logger.info("Esperando ACK de prontidão do worker (timeout de 30s)...")
+                logger.debug(f"Waiting for the ready ACK from the worker (timeout of {ACK_TIMEOUT_MS} ms) ...")
 
-                # Usa poll para aguardar dados no socket com timeout
+                # Use poll to wait for the ack
                 if self.ack_socket.poll(ACK_TIMEOUT_MS, zmq.POLLIN):
                     msg = self.ack_socket.recv_string()
                     if msg.strip().lower() == "ready":
-                        logger.info("ACK recebido. Iniciando envio de tarefas.")
+                        logger.debug("ACK received. Starting the tasks dispatch.")
                     else:
-                        logger.warning(f"Mensagem inesperada recebida no socket de ACK: {msg}")
+                        logger.warning(f"Unexpected message received in the ACK socket: {msg}")
                         return
                 else:
-                    logger.error("Timeout ao aguardar ACK de prontidão do worker.")
+                    logger.error("Timeout when waiting for ready ACK from worker.")
                     return
             except zmq.ZMQError as e:
-                logger.error(f"Erro ao aguardar ACK: {e}")
+                logger.error(f"Error while awaiting for ACK: {e}")
                 with self.lock:
+                    # put the tasks back in the queue
                     for c in cluster:
                         self.queue.append(c)
                 return
@@ -121,6 +129,7 @@ class SlurmCExecutor(ParslExecutor):
             except Exception as e:
                 logger.error(f"Failed to send task {c['task_id']}: {e}")
                 self.tasks[c['task_id']] = {"status": "error"}
+                # Set the exception and let the DKF deal with the failed task
                 self.future_tasks[c['task_id']].set_exception(SerializationError(c["func"]))
 
     def __receive_tasks(self) -> None:
@@ -128,9 +137,10 @@ class SlurmCExecutor(ParslExecutor):
         logger.info("Starting acknowledgment receiver")
         poller = zmq.Poller()
         poller.register(self.receive_task_socket, zmq.POLLIN)
+        REC_TIMEOUT = 50000 # Wait up to 5 seconds
         while not self.stop_event.is_set():
             try:
-                socks = dict(poller.poll(50000))  # Wait up to 5 seconds
+                socks = dict(poller.poll(REC_TIMEOUT))  
                 if self.receive_task_socket in socks and socks[self.receive_task_socket] == zmq.POLLIN:
                     result_data = self.receive_task_socket.recv()
                     task_id, result, error = pickle.loads(result_data)
@@ -145,6 +155,7 @@ class SlurmCExecutor(ParslExecutor):
                         with self.lock:
                             logger.error(f"Task {task_id} failed with error: {error}")
                             self.tasks[task_id]["status"] = "error"
+                            # Set the exception and let the DKF deal with the failed task
                             self.future_tasks[task_id].set_exception(Exception(error))
                 else:
                     logger.warning("No message received within timeout.")
@@ -165,7 +176,7 @@ class SlurmCExecutor(ParslExecutor):
         while not self.stop_event.is_set():
             with self.lock:
                 has_jobs = len(self.current_jobs) > 0
-            logger.debug(f"monitoring jobs. Total of current jobs: {len(self.current_jobs)}")
+            logger.debug(f"Monitoring jobs. Total of current jobs: {len(self.current_jobs)}")
             logger.debug(f"Processing a queue of {len(self.queue)} tasks")
             if has_jobs:
                 jobs_to_remove = list()
@@ -185,7 +196,7 @@ class SlurmCExecutor(ParslExecutor):
                             if self.tasks[id]["status"] == "sent":
                                 logger.error(f"Task {id} failed due to job execution time exceeded!")
 
-                                # Atualiza o estado interno
+                                # Set the exception and let the DKF deal with the failed task
                                 self.tasks[id]["status"] = "error"
                                 self.future_tasks[id].set_exception(ValueError("Task didn't receive a result"))
             time.sleep(self.job_mon_interval)
@@ -199,9 +210,10 @@ class SlurmCExecutor(ParslExecutor):
             return 
         with self.lock: # keeping this locker to avoid refactoring when we use multiple jobs
             if (len(self.current_jobs)  == self.max_jobs):
-                if self.clustering_alg in [FIFO, LIFO] or self.allow_tasks == False:
-                    return # Forces fifo to submited by level
+                if self.clustering_alg in [ClusteringAlgorithm.FIFO, ClusteringAlgorithm.LIFO] or self.allow_tasks == False:
+                    return # Forces FIFO to be submitted in new jobs, even though allow tasks is true
         if isinstance(self.provider, SlurmProvider):
+            # Get the walltime in seconds
             datetime_obj = datetime.strptime(self.provider.walltime, "%H:%M:%S")
             walltime_delta = timedelta(hours=datetime_obj.hour, minutes=datetime_obj.minute, seconds=datetime_obj.second)
             walltime = walltime_delta.total_seconds()
@@ -213,10 +225,12 @@ class SlurmCExecutor(ParslExecutor):
         df = load_df_from_db()
         with self.lock:
             if len(self.current_jobs)  == self.max_jobs:
-                walltime = (walltime - int(time.time() -  self.job_start_time))*0.9
+                # If the executor is submitting tasks in a running job, calculate the new walltime
+                REDU_FACT = 0.9
+                walltime = (walltime - int(time.time() -  self.job_start_time))*REDU_FACT
             #------------------------------
             queue_copy = list(self.queue) # creates a copy of the current queue
-            logger.info(f"Processing a queue of {len(queue_copy)} tasks")
+            logger.debug(f"Processing a queue of {len(queue_copy)} tasks")
         tasks_name = "Tasks in the queue: ["
         for i, t in enumerate(self.queue):
             tasks_name += f"{t['func'].__name__}"
@@ -224,22 +238,22 @@ class SlurmCExecutor(ParslExecutor):
             if i < len(self.queue)-1:
                 tasks_name += ", "
         tasks_name+= "]"
-        logger.info(f"{tasks_name}")
+        logger.debug(f"{tasks_name}")
         cluster = list()
         remaining_queue = list()
-        if self.clustering_alg == FIFO:
+        if self.clustering_alg == ClusteringAlgorithm.FIFO:
             cluster, remaining_queue = fifo(walltime, cores, queue_copy)
-        elif self.clustering_alg == LIFO:
+        elif self.clustering_alg == ClusteringAlgorithm.LIFO:
             cluster, remaining_queue = lifo(walltime, cores, queue_copy)
-        elif self.clustering_alg == GREEDY:
+        elif self.clustering_alg == ClusteringAlgorithm.GREEDY:
             cluster, remaining_queue = greedy(walltime, cores, df, queue_copy, min_=False)
-        elif self.clustering_alg == GREED_MIN:
+        elif self.clustering_alg == ClusteringAlgorithm.GREED_MIN:
             cluster, remaining_queue = greedy(walltime, cores, df, queue_copy, min_=True)
-        elif self.clustering_alg == GREEDY_UNLIMITED:
+        elif self.clustering_alg == ClusteringAlgorithm.GREEDY_UNLIMITED:
             cluster, remaining_queue = greedy(walltime, float('inf'), df, queue_copy, min_=False)
-        elif self.clustering_alg == HEFT_GREEDY:
+        elif self.clustering_alg == ClusteringAlgorithm.HEFT_GREEDY:
             cluster, remaining_queue = hgreedy(self.dag, walltime, cores, queue_copy)
-        else: #default to fifo
+        else: #default to FIFO
             cluster, remaining_queue = fifo(walltime, cores, queue_copy)
 
         with self.lock:
@@ -252,8 +266,8 @@ class SlurmCExecutor(ParslExecutor):
             if i < len(cluster)-1:
                 tasks_name += ", "
         tasks_name+= "]"
-        logger.info(f"Processing a cluster of {len(cluster)} tasks")
-        logger.info(f"{tasks_name}")
+        logger.debug(f"Processing a cluster of {len(cluster)} tasks")
+        logger.debug(f"{tasks_name}")
 
         processed_ids = set(t["task_id"] for t in cluster)
         with self.lock:
