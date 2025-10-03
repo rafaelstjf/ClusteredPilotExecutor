@@ -11,7 +11,6 @@ setup(
         "parsl>=1.2",   # adjust to your Parsl version
         "pyzmq",
         "networkx",
-        "sqlite3",
         "pandas",
         "matplotlib"
     ],

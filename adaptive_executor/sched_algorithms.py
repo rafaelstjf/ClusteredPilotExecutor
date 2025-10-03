@@ -2,6 +2,7 @@
 import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 def fifo(walltime, cores, queue):
     """Schedules the tasks using the First In First Out heuristic.
@@ -107,6 +108,7 @@ def greedy(walltime, cores, db, queue, min_=False):
             else:
                 average_time = 0.0
             candidates.append((task, average_time))
+            logger.debug(f"Task: {task_name} Average time (s): {average_time}")
     else:
         logger.info("Monitoring data not found! Falling back to FIFO")
         return fifo(walltime, cores, queue)

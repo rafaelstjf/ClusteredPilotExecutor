@@ -68,6 +68,7 @@ def load_df_from_db(db_path = None, run_dir = "./runinfo"):
                     df = df[df['task_time_returned'].notna() & df['task_time_invoked'].notna()] #drop NaT items
                     df.loc[:, 'runtime'] = df['task_time_returned'] - df['task_time_invoked']
                     df.loc[:, 'runtime_seconds'] = df['runtime'].dt.total_seconds()
+                    df = df[df['runtime_seconds'] >= 0]
                     return df
         except:
             return None
