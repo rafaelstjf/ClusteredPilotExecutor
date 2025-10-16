@@ -26,6 +26,17 @@ def load_graph(run_id, df):
             #print(depends_on)
             for d in depends_on:
                 dag.add_edge(int(d), task_id)
+            sources = [n for n in dag if dag.in_degree(n) == 0]
+            sinks = [n for n in dag if dag.out_degree(n) == 0]
+
+            # Add source and sink nodes to the dag (some workflows can have a dag with multiple connected components)
+            dag.add_node(-1, task_func_name="source", runtime=0)
+            dag.add_node(-2, task_func_name="sink", runtime=0)
+
+            for s in sources:
+                dag.add_edge(-1, s)
+            for t in sinks:
+                dag.add_edge(t, -2)
         #draw_dag(dag)
         return dag
     
@@ -51,7 +62,7 @@ def load_most_similar_dag(old_dag, df, task_id, task_func_name):
 
         
 
-def load_df_from_db(db_path = None, run_dir = "./runinfo"):
+def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
     df = None
     if db_path == None:
         db_path = os.path.abspath(run_dir) 

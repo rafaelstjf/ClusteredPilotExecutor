@@ -17,7 +17,7 @@ from parsl.addresses import address_by_hostname
 from parsl.providers.base import ExecutionProvider
 from parsl.providers import SlurmProvider
 from parsl.jobs.states import JobState
-from parsl.executors.adaptive_executor.dag_utils import load_df_from_db, load_most_similar_dag
+from parsl.executors.adaptive_executor.dag_utils import load_tasks_from_db, load_most_similar_dag
 from parsl.executors.adaptive_executor.sched_algorithms import *
 
 logging.basicConfig(level=logging.DEBUG)
@@ -247,7 +247,7 @@ class AdaptiveExecutor(ParslExecutor):
             walltime = int('inf')
             cores = os.cpu_count()
         logger.info("Trying to load monitoring database.")
-        df = load_df_from_db()
+        df = load_tasks_from_db()
         with self.lock:
             if len(self.current_jobs) == self.max_jobs:
                 # If the executor is submitting tasks in a running job, calculate the new walltime
