@@ -27,20 +27,29 @@ DEFAULT_LAUNCH_CMD = "python -m parsl.executors.adaptive_executor.worker tcp://{
 
 
 class ClusteringAlgorithm(Enum):
+    """_summary_
+
+    Attributes:
+    FIFO
+    LIFO
+    GREEDY
+    GREEDY_MIN
+    HEFT_GREEDY
+    """
     FIFO = auto()
     LIFO = auto()
     GREEDY = auto()
-    GREED_MIN = auto()
+    GREEDY_MIN = auto()
     GREEDY_UNLIMITED = auto()
     HEFT_GREEDY = auto()
 
 
-class AdaptiveExecutor(ParslExecutor):
+class AdaptivePilotExecutor(ParslExecutor):
     radio_mode: str = "filesystem"
 
     def __init__(
             self,
-            label: str = "AdaptiveExecutor",
+            label: str = "AdaptivePilotExecutor",
             provider: ExecutionProvider = SlurmProvider(),
             port_range: Optional[Tuple[int, int]] = (55000, 56000),
             address: Optional[str] = address_by_hostname(),
@@ -255,6 +264,7 @@ class AdaptiveExecutor(ParslExecutor):
                 time_diff = int(time.time() -
                                 self.job_start_time)
                 walltime = (walltime - time_diff)*REDU_FACT
+                logger.debug(f"Walltime for the running job: {walltime} seconds")
             # ------------------------------
             # creates a copy of the current queue
             queue_copy = list(self.queue)
@@ -277,7 +287,7 @@ class AdaptiveExecutor(ParslExecutor):
         elif self.clustering_alg == ClusteringAlgorithm.GREEDY:
             cluster, remaining_queue = greedy(
                 walltime, cores, df, queue_copy, min_=False)
-        elif self.clustering_alg == ClusteringAlgorithm.GREED_MIN:
+        elif self.clustering_alg == ClusteringAlgorithm.GREEDY_MIN:
             cluster, remaining_queue = greedy(
                 walltime, cores, df, queue_copy, min_=True)
         elif self.clustering_alg == ClusteringAlgorithm.GREEDY_UNLIMITED:
@@ -415,6 +425,8 @@ class AdaptiveExecutor(ParslExecutor):
         self.future_tasks[task_id] = Future()
         self.future_tasks[task_id].set_running_or_notify_cancel()
         self.future_tasks[task_id].parsl_executor_task_id = task_id
+
+        logger.info(f"Clustering algorithm chosen {self.clustering_alg.name}")
         return self.future_tasks[task_id]
 
     def shutdown(self) -> None:

@@ -8,6 +8,13 @@ This README explains how to set up the executor as a **standalone package** whil
 
 ## Installation
 
+### 0. Install Parsl library in editable mode
+
+```bash
+git clone https://github.com/Parsl/parsl.git
+cd parsl
+pip install -e .
+```
 ### 1. Clone the repository
 
 ```bash
