@@ -104,7 +104,11 @@ def greedy(walltime, cores, db, queue, min_=False):
             task_name = task["func"].__name__
             df_filtered = db[db["task_func_name"] == task_name]
             if not df_filtered.empty:
-                average_time = df_filtered['runtime_seconds'].mean()
+                # desvio absoluto mediano (MAD)
+                median = df_filtered['runtime_seconds'].median()
+                mad = (df_filtered['runtime_seconds'] - median).abs().median()
+                filtered_df = df_filtered[abs(df_filtered['runtime_seconds'] - median) <= 3 * mad]
+                average_time = filtered_df['runtime_seconds'].mean()
             else:
                 average_time = 0.0
             candidates.append((task, average_time))
