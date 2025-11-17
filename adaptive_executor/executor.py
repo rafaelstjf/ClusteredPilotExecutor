@@ -251,7 +251,7 @@ class AdaptivePilotExecutor(ParslExecutor):
             walltime_delta = timedelta(
                 hours=datetime_obj.hour, minutes=datetime_obj.minute, seconds=datetime_obj.second)
             walltime = walltime_delta.total_seconds()
-            cores = self.provider.cores_per_node
+            cores = self.provider.cores_per_node * self.provider.nodes_per_block
         else:
             walltime = int('inf')
             cores = os.cpu_count()
