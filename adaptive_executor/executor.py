@@ -166,7 +166,7 @@ class AdaptivePilotExecutor(ParslExecutor):
         # Blocking wait for the worker ack
         expected = self.provider.nodes_per_block
 
-        if not self.wait_for_workers(expected):
+        if not self.__wait_for_workers(expected):
             logger.error(
                 "Could not validate worker readiness. Tasks returned to queue.")
             with self.lock:
