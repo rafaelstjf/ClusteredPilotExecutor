@@ -87,13 +87,6 @@ if __name__ == "__main__":
 
     context = zmq.Context()
 
-    # Socket to receive tasks (PULL)
-    receiver = context.socket(zmq.PULL)
-    receiver.connect(input_address)
-
-    # Socket to send results (PUSH)
-    sender = context.socket(zmq.PUSH)
-    sender.connect(output_address)
 
     # Socket to send readiness ACK (PUSH)
     ack_sender = context.socket(zmq.PUSH)
@@ -102,6 +95,16 @@ if __name__ == "__main__":
     # --- Priming handshake ---
     logger.info(f"Enviando READY para {ack_address}")
     ack_sender.send_string("READY")
+
+    
+
+    # Socket to receive tasks (PULL)
+    receiver = context.socket(zmq.PULL)
+    receiver.connect(input_address)
+
+    # Socket to send results (PUSH)
+    sender = context.socket(zmq.PUSH)
+    sender.connect(output_address)
 
     # Obs.: você pode fechar o socket após enviar se quiser:
     # ack_sender.close()
