@@ -31,45 +31,93 @@ def send_callback(future, sender):
     logger.info(f"Task {task_id} result was sent back to the executor")
 
 def worker_task(receiver, sender, timeout, max_workers):
-    """Worker function to process tasks received over ZeroMQ with auto-termination."""
+    """Worker function to process tasks received over ZeroMQ with guaranteed termination."""
     logger.info("Worker started and waiting for tasks")
+
     futures = []
     poller = zmq.Poller()
-    poller.register(receiver, zmq.POLLIN)  # Listen for incoming message
+    poller.register(receiver, zmq.POLLIN)
+
     last_task_time = time.time()
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         try:
             while True:
-                events = poller.poll(timeout*1000) # Timeout is passed as parameter as seconds
-                if events:
-                    # Receive and unpack the task
-                    task_metadata = receiver.recv()
-                    task_id, task_data = pickle.loads(task_metadata)
-                    logger.info(f"Task id {task_id} received in the worker")
-                    func, args, kwargs = unpack_apply_message(task_data)
+                events = poller.poll(timeout * 1000)
 
-                    # Process the task
+                real_message_received = False
+
+                if events:
+                    # Tentamos receber SEM bloquear para diferenciar
+                    # eventos falsos do ZMQ de mensagens reais.
+                    try:
+                        task_metadata = receiver.recv(zmq.NOBLOCK)
+                        real_message_received = True
+                    except zmq.Again:
+                        # Evento falso-positivo: não há mensagem real
+                        pass
+
+                if real_message_received:
+                    # Mensagem real recebida → processar corretament
+                    try:
+                        task_id, task_data = pickle.loads(task_metadata)
+                        func, args, kwargs = unpack_apply_message(task_data)
+                    except Exception as e:
+                        logger.error(f"Erro ao decodificar tarefa: {e}")
+                        # future artificial para notificar executor
+                        f = executor.submit(lambda: (task_id, None, str(e)))
+                        f.add_done_callback(lambda fut: send_callback(fut, sender))
+                        futures.append(f)
+                        last_task_time = time.time()
+                        continue
+
+                    # Enviar para o pool
                     f = executor.submit(process_task, task_id, func, args, kwargs)
                     f.add_done_callback(lambda fut: send_callback(fut, sender))
                     futures.append(f)
                     last_task_time = time.time()
-                still_running = any(not fut.done() for fut in futures)
-                if not events and not still_running and (time.time() - last_task_time) > timeout:
-                    logger.info("No tasks received within timeout. Worker shutting down.")
-                    break  # Exit if no message arrives within the timeout
 
-        except Exception as e:
-            logger.error(f"Worker encountered an error: {e}")
+                # Limpar futures terminadas
+                futures = [f for f in futures if not f.done()]
+
+                # Condição clara de saída:
+                # 1. Nenhuma mensagem real recebida
+                # 2. Nenhuma future rodando
+                # 3. Tempo ocioso ultrapassou timeout
+                if not real_message_received \
+                   and not futures \
+                   and (time.time() - last_task_time) > timeout:
+                    logger.info(
+                        f"No activity for {timeout}s. Worker shutting down gracefully."
+                    )
+                    break
+
+        except Exception:
+            logger.exception("Worker encountered an error")
 
         finally:
-            wait(futures)  # Aguarda todas as tarefas terminarem
-            if receiver in poller.sockets:
+            try:
+                wait(futures, timeout=5)
+            except Exception:
+                pass
+
+            try:
                 poller.unregister(receiver)
-            poller.unregister(receiver)  # Unregister before closing
-            receiver.close()
-            sender.close()
-            context.term()
+            except Exception:
+                pass
+
+            try:
+                receiver.close(linger=0)
+            except Exception:
+                pass
+
+            try:
+                sender.close(linger=0)
+            except Exception:
+                pass
+
             logger.info("Worker has shut down.")
+
 
 
 if __name__ == "__main__":
@@ -96,7 +144,7 @@ if __name__ == "__main__":
     logger.info(f"Enviando READY para {ack_address}")
     ack_sender.send_string("READY")
 
-    
+
 
     # Socket to receive tasks (PULL)
     receiver = context.socket(zmq.PULL)
