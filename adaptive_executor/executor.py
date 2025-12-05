@@ -77,18 +77,35 @@ class AdaptivePilotExecutor(ParslExecutor):
         self.process_timeout = process_timeout  # Used to reset the timer
         self.allow_tasks = allow_tasks
 
-        # Socket variables
+        # --- ZMQ Context ---
         self.context = zmq.Context()
+
+        # --- Socket para enviar tarefas aos workers ---
         self.send_task_socket = self.context.socket(zmq.PUSH)
         self.push_port = self.send_task_socket.bind_to_random_port(
-            f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
+            f"tcp://{self.address}",
+            min_port=self.port_range[0],
+            max_port=self.port_range[1],
+            max_tries=100
+        )
+
+        # --- Socket para receber resultados dos workers ---
         self.receive_task_socket = self.context.socket(zmq.PULL)
         self.pull_port = self.receive_task_socket.bind_to_random_port(
-            f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
-        # Port to receive the ack when sending tasks
+            f"tcp://{self.address}",
+            min_port=self.port_range[0],
+            max_port=self.port_range[1],
+            max_tries=100
+        )
+
+        # --- Socket para receber o priming handshake (READY) ---
         self.ack_socket = self.context.socket(zmq.PULL)
         self.ack_port = self.ack_socket.bind_to_random_port(
-            f"tcp://{self.address}", min_port=self.port_range[0], max_port=self.port_range[1], max_tries=100)
+            f"tcp://{self.address}",
+            min_port=self.port_range[0],
+            max_port=self.port_range[1],
+            max_tries=100
+        )
 
         # Internal variables
         self.dag = None
@@ -109,37 +126,53 @@ class AdaptivePilotExecutor(ParslExecutor):
     def monitor_resources(self) -> bool:
         return True
 
+    def __wait_for_workers(self, expected_workers: int, timeout_ms: int = 120_000) -> bool:
+        """Waits for READY messages from the workers before sending tasks."""
+
+        logger.info(f"Awaiting READY from {expected_workers} workers...")
+        ready = 0
+
+        poller = zmq.Poller()
+        poller.register(self.ack_socket, zmq.POLLIN)
+
+        deadline = time.time() + (timeout_ms / 1000)
+
+        while ready < expected_workers:
+            now = time.time()
+            remaining = max(0, deadline - now)
+
+            if remaining == 0:
+                logger.error("Timeout waiting for workers readiness.")
+                return False
+
+            events = dict(poller.poll(remaining * 1000))
+
+            if self.ack_socket in events:
+                msg = self.ack_socket.recv_string()
+
+                if msg == "READY":
+                    ready += 1
+                    logger.info(f"Worker READY ({ready}/{expected_workers})")
+
+                else:
+                    logger.warning(f"Ignoring unexpected ACK message: {msg}")
+
+        logger.info("All workers are ready. Proceeding with task dispatch.")
+        return True
+
     def __send_tasks(self, cluster: list, send_ack=True) -> None:
         """Send tasks to the workers asynchronously."""
 
         # Blocking wait for the worker ack
-        if send_ack:
-            ACK_TIMEOUT_MS = 120_000
-            try:
-                logger.debug(
-                    f"Waiting for the ready ACK from the worker (timeout of {ACK_TIMEOUT_MS} ms) ...")
+        expected = self.provider.nodes_per_block
 
-                # Use poll to wait for the ack
-                if self.ack_socket.poll(ACK_TIMEOUT_MS, zmq.POLLIN):
-                    msg = self.ack_socket.recv_string()
-                    if msg.strip().lower() == "ready":
-                        logger.debug(
-                            "ACK received. Starting the tasks dispatch.")
-                    else:
-                        logger.warning(
-                            f"Unexpected message received in the ACK socket: {msg}")
-                        return
-                else:
-                    logger.error(
-                        "Timeout when waiting for ready ACK from worker.")
-                    return
-            except zmq.ZMQError as e:
-                logger.error(f"Error while awaiting for ACK: {e}")
-                with self.lock:
-                    # put the tasks back in the queue
-                    for c in cluster:
-                        self.queue.append(c)
-                return
+        if not self.wait_for_workers(expected):
+            logger.error(
+                "Could not validate worker readiness. Tasks returned to queue.")
+            with self.lock:
+                for t in cluster:
+                    self.queue.append(t)
+            return
         for c in cluster:
             try:
                 # Pack the function and arguments for execution
@@ -264,7 +297,8 @@ class AdaptivePilotExecutor(ParslExecutor):
                 time_diff = int(time.time() -
                                 self.job_start_time)
                 walltime = (walltime - time_diff)*REDU_FACT
-                logger.debug(f"Walltime for the running job: {walltime} seconds")
+                logger.debug(
+                    f"Walltime for the running job: {walltime} seconds")
             # ------------------------------
             # creates a copy of the current queue
             queue_copy = list(self.queue)

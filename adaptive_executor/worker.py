@@ -74,6 +74,7 @@ def worker_task(receiver, sender, timeout, max_workers):
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) != 6:
         print("Usage: python worker.py <input_address> <output_address> <ack_address> <timeout> <max_workers>")
         sys.exit(1)
@@ -84,20 +85,26 @@ if __name__ == "__main__":
     timeout = int(sys.argv[4])
     max_workers = int(sys.argv[5])
 
-    # Socket to receive tasks
+    context = zmq.Context()
+
+    # Socket to receive tasks (PULL)
     receiver = context.socket(zmq.PULL)
     receiver.connect(input_address)
 
-    # Socket to send tasks
+    # Socket to send results (PUSH)
     sender = context.socket(zmq.PUSH)
     sender.connect(output_address)
 
-    # Socket to send the ready ACK
+    # Socket to send readiness ACK (PUSH)
     ack_sender = context.socket(zmq.PUSH)
     ack_sender.connect(ack_address)
-    logger.info(f"Enviando ACK de prontidão para {ack_address}")
-    ack_sender.send_string("ready")
-    ack_sender.close()
 
-    # Start the main loop
+    # --- Priming handshake ---
+    logger.info(f"Enviando READY para {ack_address}")
+    ack_sender.send_string("READY")
+
+    # Obs.: você pode fechar o socket após enviar se quiser:
+    # ack_sender.close()
+
+    # --- Worker loop ---
     worker_task(receiver, sender, timeout, max_workers)
