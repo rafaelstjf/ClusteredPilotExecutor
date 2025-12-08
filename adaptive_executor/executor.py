@@ -107,7 +107,7 @@ class AdaptivePilotExecutor(ParslExecutor):
 
         # PUB -> workers (comandos, p.ex. stop)
         self.cmd_socket = self.context.socket(zmq.PUB)
-        self.cmd_port = self.receive_task_socket.bind_to_random_port(
+        self.cmd_port = self.cmd_socket.bind_to_random_port(
             f"tcp://{self.address}",
             min_port=self.port_range[0],
             max_port=self.port_range[1],
@@ -136,13 +136,18 @@ class AdaptivePilotExecutor(ParslExecutor):
     def __send_stop_to_all(self):
         """Publica STOP redundante várias vezes e aguarda ACKs."""
         logger.info("Publishing STOP to all workers (redundant sends)...")
-        # publish redundantly 3 times
-        for _ in range(5):
-            self.cmd_socket.send_json({"cmd": "STOP"})
-            time.sleep(1)
-    
+        # publish redundantly 10 times
+        for _ in range(10):
+            self.cmd_socket.send_multipart([b"CMD", b"STOP"])
+            time.sleep(0.1)
+        expected = self.provider.nodes_per_block
+        if self.__wait_for_workers(expected, msg="STOPPED"):
+            logger.info("Workers received STOP")
+        else:
+            logger.info("Failed to confirm STOP Reception")
 
-    def __wait_for_workers(self, expected_workers: int, timeout_ms: int = 60_000) -> bool:
+
+    def __wait_for_workers(self, expected_workers: int, timeout_ms: int = 60_000, msg: str = "READY") -> bool:
         """Waits for READY messages from the workers before sending tasks."""
 
         logger.info(f"Awaiting READY from {expected_workers} workers...")
@@ -164,14 +169,14 @@ class AdaptivePilotExecutor(ParslExecutor):
             events = dict(poller.poll(remaining * 1000))
 
             if self.ack_socket in events:
-                msg = self.ack_socket.recv_string()
+                msg_r = self.ack_socket.recv_string()
 
-                if msg == "READY":
+                if msg_r == msg:
                     ready += 1
                     logger.info(f"Worker READY ({ready}/{expected_workers})")
 
                 else:
-                    logger.warning(f"Ignoring unexpected ACK message: {msg}")
+                    logger.warning(f"Ignoring unexpected ACK message: {msg_r}")
 
         logger.info("All workers are ready. Proceeding with task dispatch.")
         return True
@@ -208,13 +213,15 @@ class AdaptivePilotExecutor(ParslExecutor):
                 # Set the exception and let the DKF deal with the failed task
                 self.future_tasks[c['task_id']].set_exception(
                     SerializationError(c["func"]))
+        if self.allow_tasks == False:
+            self.__send_stop_to_all()
 
     def __receive_tasks(self) -> None:
         """Receive results from workers."""
         logger.info("Starting acknowledgment receiver")
         poller = zmq.Poller()
         poller.register(self.receive_task_socket, zmq.POLLIN)
-        REC_TIMEOUT = 50000  # Wait up to 50 seconds
+        REC_TIMEOUT = 50_000  # Wait up to 50 seconds
         while not self.stop_event.is_set():
             try:
                 event = dict(poller.poll(REC_TIMEOUT))
@@ -382,7 +389,7 @@ class AdaptivePilotExecutor(ParslExecutor):
                 send_thread = Thread(target=self.__send_tasks,
                                     args=(cluster, False,), daemon=True)
                 send_thread.start()  # Start the task-sending thread
-            elif any(t["status"] == "sent" for t in self.tasks.values()):
+            elif all(t["status"] != "sent" for t in self.tasks.values()):
                 #TODO add stop command
                 self.__send_stop_to_all()
 
@@ -400,7 +407,7 @@ class AdaptivePilotExecutor(ParslExecutor):
             if len(self.current_jobs) == self.max_jobs:
                 return
             launch_cmd = DEFAULT_LAUNCH_CMD.format(hostname=self.address, pull_port=self.pull_port,
-                                                   push_port=self.push_port, ack_port=self.ack_port, cmd_port=self.cmd_port, poll_time=30, max_workers=max_workers, walltime=walltime)
+                                                   push_port=self.push_port, ack_port=self.ack_port, cmd_port=self.cmd_port, poll_time=1, max_workers=max_workers, walltime=walltime)
             logger.debug(launch_cmd)
             job_id = self.provider.submit(launch_cmd, 1)
             if not job_id:
@@ -423,8 +430,6 @@ class AdaptivePilotExecutor(ParslExecutor):
                 send_thread = Thread(
                     target=self.__send_tasks, args=(cluster,), daemon=True)
                 send_thread.start()  # Start the task-sending thread
-                send_thread.join() # wait for send
-                self.__send_stop_to_all()
                 break
             elif status == JobState.FAILED:
                 logger.error(f"Failed to submit SLURM job: {job_id}")

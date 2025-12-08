@@ -37,103 +37,143 @@ def send_callback(future, sender):
 def enqueue_callback(fut):
     callback_queue.put(fut)
     
-def worker_task(receiver, sender, commands, poll_time, max_workers, walltime):
+def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime):
     """Worker function to process tasks received over ZeroMQ with auto-termination."""
-    """
-    worker sempre rodando até receber o sinal de parada
-    """
     logger.info("Worker started and waiting for tasks")
     futures = []
     poller = zmq.Poller()
     running = True
     max_time = datetime.datetime.now() + datetime.timedelta(seconds=walltime)
-    poller.register(receiver, zmq.POLLIN)  # Listen for incoming message
+
+    poller.register(receiver, zmq.POLLIN)
     poller.register(commands, zmq.POLLIN)
+
     stop = False
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         try:
             while running:
-                sockets = dict(poller.poll(poll_time*1000)) # get all registered sockets in the event
+                sockets = dict(poller.poll(poll_time * 1000))
 
-                # Process the tasks
-                if receiver in sockets and sockets[receiver] == zmq.POLLIN:
+                # -----------------------------------------------------------
+                # RECEBIMENTO DE TAREFAS
+                # -----------------------------------------------------------
+                if receiver and receiver in sockets and sockets[receiver] == zmq.POLLIN:
                     while running:
                         try:
                             task_metadata = receiver.recv(zmq.NOBLOCK)
                         except zmq.Again:
                             break
-                        # Receive andd unpack the task
+
                         task_id, task_data = pickle.loads(task_metadata)
                         logger.info(f"Task id {task_id} received in the worker")
                         func, args, kwargs = unpack_apply_message(task_data)
-                        # Process the task
+
                         f = executor.submit(process_task, task_id, func, args, kwargs)
                         f.add_done_callback(enqueue_callback)
                         futures.append(f)
-                        last_task_time = time.time()
 
-                # Check if it received the stop command
+                # -----------------------------------------------------------
+                # RECEBIMENTO DE COMANDO STOP (PUB/SUB)
+                # -----------------------------------------------------------
                 if commands in sockets and sockets[commands] == zmq.POLLIN:
                     try:
-                        msg = commands.recv_json(flags=zmq.NOBLOCK)
-                        if msg.get("cmd") == "STOP":
-                            logger.info("Received STOP command.")
-                            stop = True
+                        msg = commands.recv_multipart()
+                        if len(msg) == 2:
+                            topic, payload = msg
+                            if topic == b"CMD" and payload == b"STOP":
+                                logger.info("Received STOP command.")
+                                stop = True
+                                ack_sender.send_string("STOPPED")
+                        else:
+                            logger.warning("Mensagem inválida recebida no canal de comandos")
                     except zmq.Again:
                         pass
                     except Exception:
-                        logger.exception("Failed to receive/process task")
-                
-                # Send the available results, emptying the queue
-                while running:
-                    try:
-                        fut = callback_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                    try:
-                        send_callback(fut, sender)   # envia resultado
-                    except Exception as e:
-                        logger.error(f"Callback error: {e}")
-                futures = [f for f in futures if not f.done()]
-                # confere se não tem nenhum future para processar ouse está atingindo o tempo máximo
-                if stop or (max_time - datetime.datetime.now()).total_seconds() < 60:
-                    running = False
+                        logger.exception("Failed to receive/process command")
 
-        except Exception as e:
-            logger.error(f"Worker encountered an error: {e}")
-            
-        finally:
-            #instantaneamente sai do receiver e do commands
-            try:
-                poller.unregister(receiver)
-                poller.unregister(commands)
-            except Exception:
-                pass
-            try:
-                commands.close(linger=0)
-            except Exception:
-                pass
-            try:
-                receiver.close(linger=0)
-            except Exception:
-                pass
-            # Espera a fila de trabalhos pendentes terminar
-            try:
-                wait(futures)
+                # -----------------------------------------------------------
+                # ENVIO DE RESULTADOS
+                # -----------------------------------------------------------
                 while True:
                     try:
                         fut = callback_queue.get_nowait()
                     except queue.Empty:
                         break
-
                     try:
-                        send_callback(fut, sender)   # envia resultado
+                        send_callback(fut, sender)
                     except Exception as e:
                         logger.error(f"Callback error: {e}")
+
+                futures = [f for f in futures if not f.done()]
+
+                # -----------------------------------------------------------
+                # CHECAGEM DE TEMPO RESTANTE
+                # -----------------------------------------------------------
+                if not stop and datetime.datetime.now() >= max_time - datetime.timedelta(seconds=60):
+                    logger.info("Time threshold reached — stop receiving new tasks.")
+                    stop = True
+                    if receiver:
+                        try:
+                            poller.unregister(receiver)
+                        except Exception:
+                            pass
+                        receiver = None
+
+                # -----------------------------------------------------------
+                # ENCERRAMENTO DO LOOP PRINCIPAL
+                # -----------------------------------------------------------
+                if stop and not futures and callback_queue.empty():
+                    running = False
+
+            # -----------------------------------------------------------
+            # DRENAGEM FINAL
+            # -----------------------------------------------------------
+            try:
+                wait(futures)
             except Exception:
                 pass
+
+            while True:
+                try:
+                    fut = callback_queue.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    send_callback(fut, sender)
+                except Exception as e:
+                    logger.error(f"Callback error: {e}")
+
+        except Exception as e:
+            logger.error(f"Worker encountered an error: {e}")
+
+        finally:
+            # -----------------------------------------------------------
+            # FECHAMENTO SEGURO DE SOCKETS
+            # -----------------------------------------------------------
+
+            if receiver:
+                try:
+                    poller.unregister(receiver)
+                except Exception:
+                    pass
+                try:
+                    receiver.close(linger=0)
+                except Exception:
+                    pass
+
+            if commands:
+                try:
+                    poller.unregister(commands)
+                except Exception:
+                    pass
+                try:
+                    commands.close(linger=0)
+                except Exception:
+                    pass
+
             try:
-                sender.close(linger=0)
+                sender.close(linger=-1)
             except Exception:
                 pass
 
@@ -179,8 +219,8 @@ if __name__ == "__main__":
     # SUB para comandos
     commands = context.socket(zmq.SUB)
     commands.connect(commands_address)
-    commands.setsockopt_string(zmq.SUBSCRIBE, "")
+    commands.setsockopt(zmq.SUBSCRIBE, b"CMD")
 
 
     # --- Worker loop ---
-    worker_task(receiver, sender, commands, poll_time, max_workers, walltime)
+    worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime)
