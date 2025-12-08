@@ -42,7 +42,7 @@ def load_graph(run_id, df):
     
 
 def load_most_similar_dag(old_dag, df, task_id, task_func_name):
-    if old_dag is not None and len(old_dag.nodes) > task_id and old_dag.nodes[task_id]["task_func_name"] == task_func_name:
+    if old_dag is not None and task_id in old_dag.nodes and old_dag.nodes[task_id]["task_func_name"] == task_func_name:
         logger.info("Old DAG seems to be the most similar to the current task")
         return old_dag
 
