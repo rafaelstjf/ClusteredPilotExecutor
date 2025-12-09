@@ -173,7 +173,7 @@ class AdaptivePilotExecutor(ParslExecutor):
 
                 if msg_r == msg:
                     ready += 1
-                    logger.info(f"Worker READY ({ready}/{expected_workers})")
+                    logger.info(f"Worker msg ({ready}/{expected_workers})")
 
                 else:
                     logger.warning(f"Ignoring unexpected ACK message: {msg_r}")
@@ -213,7 +213,7 @@ class AdaptivePilotExecutor(ParslExecutor):
                 # Set the exception and let the DKF deal with the failed task
                 self.future_tasks[c['task_id']].set_exception(
                     SerializationError(c["func"]))
-        if self.allow_tasks == False:
+        if self.allow_tasks == False or self.clustering_alg in [ClusteringAlgorithm.FIFO, ClusteringAlgorithm.LIFO]:
             self.__send_stop_to_all()
 
     def __receive_tasks(self) -> None:
