@@ -11,34 +11,43 @@ def load_graph(run_id, df):
     dag = nx.DiGraph()
     df_run = df[df["run_id"] == run_id]
     df_run = df_run.sort_values(by=['task_id'], ascending=[True])
+
     if df_run.empty:
         return None
-    else:
-        #print(df_run)
-        tasks = df_run[["task_id", "task_func_name", "runtime_seconds", "task_depends"]]
-        for i, r in tasks.iterrows():
-            task_id = r["task_id"]
-            task_func_name = r["task_func_name"]
-            runtime = r["runtime_seconds"]
-            depends_on = (r["task_depends"]).split(',')
-            depends_on = list(filter((lambda x : len(x)>0), depends_on))
-            dag.add_node(task_id, task_func_name=task_func_name, runtime=runtime)
-            #print(depends_on)
-            for d in depends_on:
+
+    tasks = df_run[["task_id", "task_func_name", "runtime_seconds", "task_depends"]]
+
+    # Construção do DAG base
+    for i, r in tasks.iterrows():
+        task_id = r["task_id"]
+        task_func_name = r["task_func_name"]
+        runtime = r["runtime_seconds"]
+
+        depends_on = str(r["task_depends"]).split(',')
+        depends_on = list(filter(lambda x: len(x) > 0, depends_on))
+
+        dag.add_node(task_id, task_func_name=task_func_name, runtime=runtime)
+
+        for d in depends_on:
+            try:
                 dag.add_edge(int(d), task_id)
-            sources = [n for n in dag if dag.in_degree(n) == 0]
-            sinks = [n for n in dag if dag.out_degree(n) == 0]
+            except ValueError:
+                # ignora dependências inválidas
+                pass
 
-            # Add source and sink nodes to the dag (some workflows can have a dag with multiple connected components)
-            dag.add_node(-1, task_func_name="source", runtime=0)
-            dag.add_node(-2, task_func_name="sink", runtime=0)
+    # Após construir o DAG completo, adiciona source (-1) e sink (-2)
+    dag.add_node(-1, task_func_name="source", runtime=0)
+    dag.add_node(-2, task_func_name="sink", runtime=0)
 
-            for s in sources:
-                dag.add_edge(-1, s)
-            for t in sinks:
-                dag.add_edge(t, -2)
-        #draw_dag(dag)
-        return dag
+    sources = [n for n in dag if dag.in_degree(n) == 0 and n not in (-1, -2)]
+    sinks = [n for n in dag if dag.out_degree(n) == 0 and n not in (-1, -2)]
+
+    for s in sources:
+        dag.add_edge(-1, s)
+    for t in sinks:
+        dag.add_edge(t, -2)
+
+    return dag
     
 
 def load_most_similar_dag(old_dag, df, task_id, task_func_name):
@@ -71,7 +80,7 @@ def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
         logger.debug("Monitoring.db found!")
         try:
             with sqlite3.connect(monitoring_db_file) as connection:
-                    select_query = f"SELECT * FROM task"
+                    select_query = f"SELECT task_time_invoked, task_time_returned, task_id, run_id, task_func_name FROM task"
                     df = pd.read_sql_query(select_query, connection)
                     df = df[df['task_time_returned'].notnull() & df['task_time_invoked'].notnull()] #select only the items with valid timestamps
                     df['task_time_returned'] = pd.to_datetime(df['task_time_returned'], errors='coerce')

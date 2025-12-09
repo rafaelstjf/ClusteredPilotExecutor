@@ -44,21 +44,33 @@ def lifo(walltime, cores, queue):
         queue.clear()
     return cluster, queue
 
-def __calc_upward_rank(node, dag):
+def __calc_upward_rank(node, dag, cache):
+    # Memoization
+    if node in cache:
+        return cache[node]
+
     try:
-        w_node = dag.nodes[node]["runtime"] # average computation weigth
-    except:
-        return float("inf") # if the node is not in the graph, put it as a priority
-    if len(list(dag.neighbors(node))) == 0:
+        w_node = dag.nodes[node]["runtime"]  # average computation weight
+    except KeyError:
+        cache[node] = float("inf")
+        return cache[node]
+
+    successors = list(dag.successors(node))
+    if len(successors) == 0:
+        cache[node] = w_node
         return w_node
-    else:
-        max_ = 0
-        for suc in dag.neighbors(node):
-            c_node_suc = 0 # Communication cost is considered zero
-            rank_suc = __calc_upward_rank(suc, dag)
-            max_ = max(rank_suc + c_node_suc, max_)
-        return w_node + max_
-    
+
+    max_ = 0
+    for suc in successors:
+        c_node_suc = 0  # Communication cost is considered zero
+        rank_suc = __calc_upward_rank(suc, dag, cache)
+        max_ = max(rank_suc + c_node_suc, max_)
+
+    total = w_node + max_
+    cache[node] = total
+    return total
+
+
 def hgreedy(dag, walltime, cores, queue):
     """Schedules the tasks using a greedy heuristic, sorting the tasks by their upward rank
 
@@ -73,15 +85,26 @@ def hgreedy(dag, walltime, cores, queue):
     """
     if dag is None:
         return fifo(walltime, cores, queue)
-    rank = list()
+
+    cache = {}
+    rank = []
     for task in queue:
         task_id = task["task_id"]
-        r = __calc_upward_rank(task_id, dag)
+        r = __calc_upward_rank(task_id, dag, cache)
         rank.append((task_id, r))
-    rank.sort(key=lambda x: x[1], reverse=True) # sort the rank by the value
-    task_ids_to_keep = [task_id for task_id, _ in rank[:cores]] #check if there are more tasks than cores
-    cluster = [task for task in queue if task["task_id"] in task_ids_to_keep] # add the selected tasks to the cluster
-    queue = [task for task in queue if task["task_id"] not in task_ids_to_keep] # keep in the queue the remaining tasks
+
+    # Sort by rank value
+    rank.sort(key=lambda x: x[1], reverse=True)
+
+    # Select top tasks
+    task_ids_to_keep = [task_id for task_id, _ in rank[:cores]]
+
+    # Build cluster preserving the ranking order
+    cluster = [next(task for task in queue if task["task_id"] == tid) for tid in task_ids_to_keep]
+
+    # Remaining tasks stay in the queue
+    queue = [task for task in queue if task["task_id"] not in task_ids_to_keep]
+
     return cluster, queue
 
 def greedy(walltime, cores, db, queue, min_=False):
