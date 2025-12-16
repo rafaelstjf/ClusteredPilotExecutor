@@ -80,7 +80,7 @@ def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
         logger.debug("Monitoring.db found!")
         try:
             with sqlite3.connect(monitoring_db_file) as connection:
-                    select_query = f"SELECT task_time_invoked, task_time_returned, task_id, run_id, task_func_name FROM task"
+                    select_query = f"SELECT task_time_invoked, task_time_returned, task_id, run_id, task_func_name, task_depends FROM task"
                     df = pd.read_sql_query(select_query, connection)
                     df = df[df['task_time_returned'].notnull() & df['task_time_invoked'].notnull()] #select only the items with valid timestamps
                     df['task_time_returned'] = pd.to_datetime(df['task_time_returned'], errors='coerce')
