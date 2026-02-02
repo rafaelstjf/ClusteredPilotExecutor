@@ -37,10 +37,10 @@ cd <parsl-root>/parsl/executors
 ln -s /path/to/adaptive-parsl-executor adaptive_executor
 ```
 
-Replace `/path/to/adaptive-parsl-executor` with the absolute path of the cloned repository. After this, you can import like:
+Replace `/path/to/clustered-pilot-executor` with the absolute path of the cloned repository. After this, you can import like:
 
 ```python
-from parsl.executors.adaptive_executor.executor import AdaptivePilotExecutor
+from parsl.executors.clustered_pilot_executor.executor import ClusteredPilotExecutor
 ```
 
 ## Usage Example
@@ -56,12 +56,9 @@ from parsl.executors.adaptive_executor.executor import AdaptivePilotExecutor
 ## Notes
 
 * Designed for HPC bioinformatics pipelines using external tools.
-* Fully compatible with any existing Parsl installation.w
-* Threads are used for task orchestration; the GIL is irrelevant because the tasks spawn external processes.
+* Fully compatible with any existing Parsl installation.
+* Threads are used for task orchestration; the GIL is irrelevant because the tasks spawn external processes (in the intended scenarios).
 
-## License
-
-Include your preferred license here, e.g., MIT, Apache 2.0, or GPL.
 
 ## References
 

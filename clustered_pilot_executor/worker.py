@@ -55,9 +55,7 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
             while running:
                 sockets = dict(poller.poll(poll_time * 1000))
 
-                # -----------------------------------------------------------
-                # RECEBIMENTO DE TAREFAS
-                # -----------------------------------------------------------
+                # Receiving tasks 
                 if receiver and receiver in sockets and sockets[receiver] == zmq.POLLIN:
                     while running:
                         try:
@@ -73,9 +71,7 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
                         f.add_done_callback(enqueue_callback)
                         futures.append(f)
 
-                # -----------------------------------------------------------
-                # RECEBIMENTO DE COMANDO STOP (PUB/SUB)
-                # -----------------------------------------------------------
+                # if the message is a command
                 if commands in sockets and sockets[commands] == zmq.POLLIN:
                     try:
                         msg = commands.recv_multipart()
@@ -86,15 +82,13 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
                                 stop = True
                                 ack_sender.send_string("STOPPED")
                         else:
-                            logger.warning("Mensagem inválida recebida no canal de comandos")
+                            logger.warning("Invalid message received!")
                     except zmq.Again:
                         pass
                     except Exception:
                         logger.exception("Failed to receive/process command")
 
-                # -----------------------------------------------------------
-                # ENVIO DE RESULTADOS
-                # -----------------------------------------------------------
+                # Sending the results
                 while True:
                     try:
                         fut = callback_queue.get_nowait()
@@ -120,15 +114,11 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
                             pass
                         receiver = None
 
-                # -----------------------------------------------------------
-                # ENCERRAMENTO DO LOOP PRINCIPAL
-                # -----------------------------------------------------------
+                # Getting out of the main loop
                 if stop and not futures and callback_queue.empty():
                     running = False
 
-            # -----------------------------------------------------------
-            # DRENAGEM FINAL
-            # -----------------------------------------------------------
+            # Final drainage, waiting for all futures
             try:
                 wait(futures)
             except Exception:
@@ -148,10 +138,7 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
             logger.error(f"Worker encountered an error: {e}")
 
         finally:
-            # -----------------------------------------------------------
-            # FECHAMENTO SEGURO DE SOCKETS
-            # -----------------------------------------------------------
-
+            # Closing all connections
             if receiver:
                 try:
                     poller.unregister(receiver)
@@ -203,7 +190,7 @@ if __name__ == "__main__":
     ack_sender.connect(ack_address)
 
     # --- Priming handshake ---
-    logger.info(f"Enviando READY para {ack_address}")
+    logger.info(f"Sending READY to {ack_address}")
     ack_sender.send_string("READY")
 
 

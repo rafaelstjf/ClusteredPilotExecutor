@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="adaptive-parsl-executor",
     version="0.1.0",
-    description="AdaptivePilotExecutor for Parsl: supports pilot jobs, clustering, and dynamic task submission.",
+    description="ClusteredPilotExecutor for Parsl: supports pilot jobs, clustering, and dynamic task submission.",
     author="Rafael Terra",
     author_email="rafaelstjf@gmail.com",
     packages=find_packages(),
