@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="adaptive-parsl-executor",
+    name="clustered-pilot-executor",
     version="0.1.0",
     description="ClusteredPilotExecutor for Parsl: supports pilot jobs, clustering, and dynamic task submission.",
     author="Rafael Terra",

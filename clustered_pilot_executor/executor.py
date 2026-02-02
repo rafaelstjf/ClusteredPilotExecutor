@@ -30,15 +30,16 @@ class ClusteringAlgorithm(Enum):
     """
     FIFO
     LIFO
-    GREEDY
-    GREEDY_MIN
+    LONGEST_JOB_FIRST
+    SHORTEST_JOB_FIRST
+    LONGEST_JOB_FIRST_UNLIMITED
     HEFT_GREEDY
     """
     FIFO = auto()
     LIFO = auto()
-    GREEDY = auto()
-    GREEDY_MIN = auto()
-    GREEDY_UNLIMITED = auto()
+    LONGEST_JOB_FIRST = auto()
+    SHORTEST_JOB_FIRST = auto()
+    LONGEST_JOB_FIRST_UNLIMITED = auto()
     HEFT_GREEDY = auto()
 
 
@@ -135,22 +136,22 @@ class ClusteredPilotExecutor(ParslExecutor):
 
     def __send_stop_to_all(self):
         """Publica STOP redundante várias vezes e aguarda ACKs."""
-        logger.info("Publishing STOP to all workers (redundant sends)...")
+        logger.debug("Publishing STOP to all workers (redundant sends)...")
         # publish redundantly 10 times
         for _ in range(10):
             self.cmd_socket.send_multipart([b"CMD", b"STOP"])
             time.sleep(0.1)
         expected = self.provider.nodes_per_block
         if self.__wait_for_workers(expected, msg="STOPPED"):
-            logger.info("Workers received STOP")
+            logger.debug("Workers received STOP")
         else:
-            logger.info("Failed to confirm STOP Reception")
+            logger.debug("Failed to confirm STOP Reception")
 
 
     def __wait_for_workers(self, expected_workers: int, timeout_ms: int = 60_000, msg: str = "READY") -> bool:
         """Waits for READY messages from the workers before sending tasks."""
 
-        logger.info(f"Awaiting READY from {expected_workers} workers...")
+        logger.debug(f"Awaiting READY from {expected_workers} workers...")
         ready = 0
 
         poller = zmq.Poller()
@@ -173,12 +174,12 @@ class ClusteredPilotExecutor(ParslExecutor):
 
                 if msg_r == msg:
                     ready += 1
-                    logger.info(f"Worker msg ({ready}/{expected_workers})")
+                    logger.debug(f"Worker msg ({ready}/{expected_workers})")
 
                 else:
                     logger.warning(f"Ignoring unexpected ACK message: {msg_r}")
 
-        logger.info("All workers are ready. Proceeding with task dispatch.")
+        logger.debug("All workers are ready. Proceeding with task dispatch.")
         return True
 
     def __send_tasks(self, cluster: list, send_ack=True) -> None:
@@ -218,7 +219,7 @@ class ClusteredPilotExecutor(ParslExecutor):
 
     def __receive_tasks(self) -> None:
         """Receive results from workers."""
-        logger.info("Starting acknowledgment receiver")
+        logger.debug("Starting acknowledgment receiver")
         poller = zmq.Poller()
         poller.register(self.receive_task_socket, zmq.POLLIN)
         REC_TIMEOUT = 50_000  # Wait up to 50 seconds
@@ -314,7 +315,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             walltime = int('inf')
             cores = os.cpu_count()
             cores_old = cores
-        logger.info("Trying to load monitoring database.")
+        logger.debug("Trying to load monitoring database.")
         df = load_tasks_from_db()
         with self.lock:
             if len(self.current_jobs) == self.max_jobs:
@@ -350,13 +351,13 @@ class ClusteredPilotExecutor(ParslExecutor):
             cluster, remaining_queue = fifo(walltime, cores, queue_copy)
         elif self.clustering_alg == ClusteringAlgorithm.LIFO:
             cluster, remaining_queue = lifo(walltime, cores, queue_copy)
-        elif self.clustering_alg == ClusteringAlgorithm.GREEDY:
+        elif self.clustering_alg == ClusteringAlgorithm.LONGEST_JOB_FIRST_UNLIMITED:
             cluster, remaining_queue = greedy(
                 walltime, cores, df, queue_copy, min_=False)
-        elif self.clustering_alg == ClusteringAlgorithm.GREEDY_MIN:
+        elif self.clustering_alg == ClusteringAlgorithm.SHORTEST_JOB_FIRST_UNLIMITED:
             cluster, remaining_queue = greedy(
                 walltime, cores, df, queue_copy, min_=True)
-        elif self.clustering_alg == ClusteringAlgorithm.GREEDY_UNLIMITED:
+        elif self.clustering_alg == ClusteringAlgorithm.LONGEST_JOB_FIRST_UNLIMITED_UNLIMITED:
             cluster, remaining_queue = greedy(
                 walltime, float('inf'), df, queue_copy, min_=False)
         elif self.clustering_alg == ClusteringAlgorithm.HEFT_GREEDY:
@@ -381,8 +382,6 @@ class ClusteredPilotExecutor(ParslExecutor):
 
         processed_ids = set(t["task_id"] for t in cluster)
         with self.lock:
-            logger.info(
-                "---------------------inside the lock--------------------------------")
             self.queue = [t for t in self.queue if t["task_id"]
                           not in processed_ids]
             cur_jobs = len(self.current_jobs)
@@ -408,7 +407,7 @@ class ClusteredPilotExecutor(ParslExecutor):
         """
         # Submit the SLURM job
         with self.lock:
-            logger.info(
+            logger.debug(
                 "-------------------------INSIDE the submit job function-------------------------")
             if len(self.current_jobs) == self.max_jobs:
                 return
