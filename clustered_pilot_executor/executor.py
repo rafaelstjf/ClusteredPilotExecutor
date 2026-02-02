@@ -42,12 +42,12 @@ class ClusteringAlgorithm(Enum):
     HEFT_GREEDY = auto()
 
 
-class AdaptivePilotExecutor(ParslExecutor):
+class ClusteredPilotExecutor(ParslExecutor):
     radio_mode: str = "filesystem"
 
     def __init__(
             self,
-            label: str = "AdaptivePilotExecutor",
+            label: str = "ClusteredPilotExecutor",
             provider: ExecutionProvider = SlurmProvider(),
             port_range: Optional[Tuple[int, int]] = (55000, 56000),
             address: Optional[str] = address_by_hostname(),
