@@ -41,23 +41,13 @@ Replace `/path/to/clustered-pilot-executor` with the absolute path of the cloned
 
 ```python
 from parsl.executors.clustered_pilot_executor.executor import ClusteredPilotExecutor
-```
-
-## Usage Example
-
-```python
-```
-
-## Testing
-
-``python
-``
+``` 
 
 ## Notes
 
 * Designed for HPC bioinformatics pipelines using external tools.
 * Fully compatible with any existing Parsl installation.
-* Threads are used for task orchestration; the GIL is irrelevant because the tasks spawn external processes (in the intended scenarios).
+* Threads are used for task orchestration; the GIL is irrelevant because the tasks are usually `bash_apps` (in the intended scenarios).
 
 
 ## References
