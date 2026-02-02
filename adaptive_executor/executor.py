@@ -329,6 +329,12 @@ class AdaptivePilotExecutor(ParslExecutor):
             # creates a copy of the current queue
             queue_copy = list(self.queue)
             logger.debug(f"Processing a queue of {len(queue_copy)} tasks")
+
+            # Limit the number of tasks to a maximum of 40
+            # cores = cores - min(cores, sum([t["status"] == "sent" for t in self.tasks.values()]))
+            # if cores == 0:
+            #     logger.debug("Using all cores now. Skipping task processing.")
+            #     return
         tasks_name = "Tasks in the queue: ["
         for i, t in enumerate(self.queue):
             tasks_name += f"{t['func'].__name__}"

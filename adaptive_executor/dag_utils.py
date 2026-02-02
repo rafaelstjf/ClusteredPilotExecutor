@@ -71,27 +71,110 @@ def load_most_similar_dag(old_dag, df, task_id, task_func_name):
 
         
 
-def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
-    df = None
-    if db_path == None:
-        db_path = os.path.abspath(run_dir) 
+def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
+    if db_path is None:
+        db_path = os.path.abspath(run_dir)
+
     monitoring_db_file = os.path.join(db_path, "monitoring.db")
-    if os.path.exists(monitoring_db_file):
-        logger.debug("Monitoring.db found!")
-        try:
-            with sqlite3.connect(monitoring_db_file) as connection:
-                    select_query = f"SELECT task_time_invoked, task_time_returned, task_id, run_id, task_func_name, task_depends FROM task"
-                    df = pd.read_sql_query(select_query, connection)
-                    df = df[df['task_time_returned'].notnull() & df['task_time_invoked'].notnull()] #select only the items with valid timestamps
-                    df['task_time_returned'] = pd.to_datetime(df['task_time_returned'], errors='coerce')
-                    df['task_time_invoked'] = pd.to_datetime(df['task_time_invoked'], errors='coerce')
-                    df = df[df['task_time_returned'].notna() & df['task_time_invoked'].notna()] #drop NaT items
-                    df.loc[:, 'runtime'] = df['task_time_returned'] - df['task_time_invoked']
-                    df.loc[:, 'runtime_seconds'] = df['runtime'].dt.total_seconds()
-                    df = df[df['runtime_seconds'] >= 0]
-                    return df
-        except:
-            return None
+    if not os.path.exists(monitoring_db_file):
+        return None
+
+    try:
+        with sqlite3.connect(monitoring_db_file) as conn:
+
+            # QUERY ORIGINAL (inalterada)
+            task_df = pd.read_sql_query(
+                """
+                SELECT task_id, run_id, task_func_name, task_depends
+                FROM task
+                """,
+                conn
+            )
+
+            # Status usado apenas para cálculo do runtime
+            status_df = pd.read_sql_query(
+                """
+                SELECT task_id, run_id, try_id, task_status_name, timestamp
+                FROM status
+                """,
+                conn
+            )
+
+            status_df['timestamp'] = pd.to_datetime(
+                status_df['timestamp'], errors='coerce'
+            )
+            status_df = status_df.dropna(subset=['timestamp'])
+
+            # Seleciona a maior tentativa por tarefa
+            max_try = (
+                status_df
+                .groupby(['task_id', 'run_id'])['try_id']
+                .max()
+                .reset_index()
+            )
+
+            status_df = status_df.merge(
+                max_try,
+                on=['task_id', 'run_id', 'try_id'],
+                how='inner'
+            )
+
+            # Início e fim da execução
+            start_df = status_df[
+                status_df['task_status_name'] == 'running'
+            ][['task_id', 'run_id', 'timestamp']]
+
+            end_df = status_df[
+                status_df['task_status_name'].isin(['exec_done', 'completed'])
+            ][['task_id', 'run_id', 'timestamp']]
+
+            runtime_df = start_df.merge(
+                end_df,
+                on=['task_id', 'run_id'],
+                suffixes=('_start', '_end')
+            )
+
+            runtime_df['runtime_seconds'] = (
+                runtime_df['timestamp_end'] -
+                runtime_df['timestamp_start']
+            ).dt.total_seconds()
+
+            runtime_df = runtime_df[runtime_df['runtime_seconds'] >= 0]
+
+            # Junta runtime com a query original
+            final_df = task_df.merge(
+                runtime_df[['task_id', 'run_id', 'runtime_seconds']],
+                on=['task_id', 'run_id'],
+                how='inner'
+            )
+
+            return final_df
+
+    except Exception as e:
+        logger.error(f"Erro ao carregar monitoring.db: {e}")
+        return None
+
+# def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
+#     df = None
+#     if db_path == None:
+#         db_path = os.path.abspath(run_dir) 
+#     monitoring_db_file = os.path.join(db_path, "monitoring.db")
+#     if os.path.exists(monitoring_db_file):
+#         logger.debug("Monitoring.db found!")
+#         try:
+#             with sqlite3.connect(monitoring_db_file) as connection:
+#                     select_query = f"SELECT task_time_invoked, task_time_returned, task_id, run_id, task_func_name, task_depends FROM task"
+#                     df = pd.read_sql_query(select_query, connection)
+#                     df = df[df['task_time_returned'].notnull() & df['task_time_invoked'].notnull()] #select only the items with valid timestamps
+#                     df['task_time_returned'] = pd.to_datetime(df['task_time_returned'], errors='coerce')
+#                     df['task_time_invoked'] = pd.to_datetime(df['task_time_invoked'], errors='coerce')
+#                     df = df[df['task_time_returned'].notna() & df['task_time_invoked'].notna()] #drop NaT items
+#                     df.loc[:, 'runtime'] = df['task_time_returned'] - df['task_time_invoked']
+#                     df.loc[:, 'runtime_seconds'] = df['runtime'].dt.total_seconds()
+#                     df = df[df['runtime_seconds'] >= 0]
+#                     return df
+#         except:
+#             return None
         
 
 
