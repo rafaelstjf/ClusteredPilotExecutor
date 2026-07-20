@@ -167,13 +167,13 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
 
 
 
-if __name__ == "__main__":
+def main() -> None:
     import sys
     if len(sys.argv) != 8:
-        print("Usage: python worker.py <receiver_addres> <sender_address> <ack_address> <commands_address> <poll_time> <max_workers> <walltime>")
+        logger.error("Usage: python -m parsl.executors.clustered_pilot_executor.worker <receiver_address> <sender_address> <ack_address> <commands_address> <poll_time> <max_workers> <walltime>")
         sys.exit(1)
 
-    receiver_addres = sys.argv[1]
+    receiver_address = sys.argv[1]
     sender_address = sys.argv[2]
     ack_address = sys.argv[3]
     commands_address = sys.argv[4]
@@ -183,30 +183,27 @@ if __name__ == "__main__":
 
     context = zmq.Context()
 
-
-    # Socket to send readiness ACK (PUSH)
     ack_sender = context.socket(zmq.PUSH)
     ack_sender.connect(ack_address)
-
-    # --- Priming handshake ---
     logger.info(f"Sending READY to {ack_address}")
     ack_sender.send_string("READY")
 
-
-
-    # Socket to receive tasks (PULL)
     receiver = context.socket(zmq.PULL)
-    receiver.connect(receiver_addres)
+    receiver.connect(receiver_address)
 
-    # Socket to send results (PUSH)
     sender = context.socket(zmq.PUSH)
     sender.connect(sender_address)
 
-    # SUB para comandos
     commands = context.socket(zmq.SUB)
     commands.connect(commands_address)
     commands.setsockopt(zmq.SUBSCRIBE, b"CMD")
 
+    try:
+        worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime)
+    finally:
+        ack_sender.close(linger=0)
+        context.term()
 
-    # --- Worker loop ---
-    worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime)
+
+if __name__ == "__main__":
+    main()
