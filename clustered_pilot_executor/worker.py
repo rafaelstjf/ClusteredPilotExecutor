@@ -101,9 +101,8 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
 
                 futures = [f for f in futures if not f.done()]
 
-                # -----------------------------------------------------------
-                # CHECAGEM DE TEMPO RESTANTE
-                # -----------------------------------------------------------
+                # verifying the remaining time
+
                 if not stop and datetime.datetime.now() >= max_time - datetime.timedelta(seconds=60):
                     logger.info("Time threshold reached — stop receiving new tasks.")
                     stop = True
