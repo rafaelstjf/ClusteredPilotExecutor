@@ -141,3 +141,20 @@ from parsl.executors.clustered_pilot_executor.executor import ClusteringAlgorith
 ```
 
 This symlink-based installation is **not recommended** for regular use. It should be used only for local testing or development, because it depends on the internal layout of the Parsl installation and may break when Parsl is updated.
+
+## Clustering heuristics
+
+The executor heuristics are local task-clustering strategies for pilot jobs. Parsl still manages the workflow DAG, dependencies, and futures.
+
+Available heuristics:
+
+- `FIFO`: First In, First Out.
+- `LIFO`: Last In, First Out.
+- `SJF`: Shortest Job First, using historical runtime estimates.
+- `LJF`: Longest Job First, using historical runtime estimates.
+- `LJFU`: Longest Job First Unlimited by core count.
+- `GUR`: Greedy Upward Rank.
+
+Runtime-based heuristics use Parsl monitoring history when available. If history is missing or unreliable, the executor falls back to `FIFO`.
+
+`GUR` is based on upward-rank prioritization, but it is not the full HEFT algorithm.

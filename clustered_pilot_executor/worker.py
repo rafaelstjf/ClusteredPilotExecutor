@@ -6,16 +6,18 @@ import datetime
 from parsl.serialize import pack_apply_message, unpack_apply_message
 import queue
 from concurrent.futures import ThreadPoolExecutor, wait
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s %(levelname)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 context = zmq.Context()
 receiver = None
 sender = None
 callback_queue = queue.Queue()
+
 
 def process_task(task_id, func, args, kwargs):
     """Process the received task."""
@@ -28,16 +30,21 @@ def process_task(task_id, func, args, kwargs):
         logger.info(f"Task {task_id} failed with error: {e}")
         return task_id, None, str(e)
 
+
 def send_callback(future, sender):
     task_id, result, error = future.result()
     result_data = pickle.dumps((task_id, result, error))
     sender.send(result_data)
     logger.info(f"Task {task_id} result was sent back to the executor")
 
+
 def enqueue_callback(fut):
     callback_queue.put(fut)
-    
-def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime):
+
+
+def worker_task(
+    receiver, sender, commands, ack_sender, poll_time, max_workers, walltime
+):
     """Worker function to process tasks received over ZeroMQ with auto-termination."""
     logger.info("Worker started and waiting for tasks")
     futures = []
@@ -55,7 +62,7 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
             while running:
                 sockets = dict(poller.poll(poll_time * 1000))
 
-                # Receiving tasks 
+                # Receiving tasks
                 if receiver and receiver in sockets and sockets[receiver] == zmq.POLLIN:
                     while running:
                         try:
@@ -103,7 +110,11 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
 
                 # verifying the remaining time
 
-                if not stop and datetime.datetime.now() >= max_time - datetime.timedelta(seconds=60):
+                if (
+                    not stop
+                    and datetime.datetime.now()
+                    >= max_time - datetime.timedelta(seconds=60)
+                ):
                     logger.info("Time threshold reached — stop receiving new tasks.")
                     stop = True
                     if receiver:
@@ -166,14 +177,16 @@ def worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, 
             logger.info("Worker has shut down.")
 
 
-
-if __name__ == "__main__":
+def main() -> None:
     import sys
+
     if len(sys.argv) != 8:
-        print("Usage: python worker.py <receiver_addres> <sender_address> <ack_address> <commands_address> <poll_time> <max_workers> <walltime>")
+        logger.error(
+            "Usage: python -m parsl.executors.clustered_pilot_executor.worker <receiver_address> <sender_address> <ack_address> <commands_address> <poll_time> <max_workers> <walltime>"
+        )
         sys.exit(1)
 
-    receiver_addres = sys.argv[1]
+    receiver_address = sys.argv[1]
     sender_address = sys.argv[2]
     ack_address = sys.argv[3]
     commands_address = sys.argv[4]
@@ -183,30 +196,29 @@ if __name__ == "__main__":
 
     context = zmq.Context()
 
-
-    # Socket to send readiness ACK (PUSH)
     ack_sender = context.socket(zmq.PUSH)
     ack_sender.connect(ack_address)
-
-    # --- Priming handshake ---
     logger.info(f"Sending READY to {ack_address}")
     ack_sender.send_string("READY")
 
-
-
-    # Socket to receive tasks (PULL)
     receiver = context.socket(zmq.PULL)
-    receiver.connect(receiver_addres)
+    receiver.connect(receiver_address)
 
-    # Socket to send results (PUSH)
     sender = context.socket(zmq.PUSH)
     sender.connect(sender_address)
 
-    # SUB para comandos
     commands = context.socket(zmq.SUB)
     commands.connect(commands_address)
     commands.setsockopt(zmq.SUBSCRIBE, b"CMD")
 
+    try:
+        worker_task(
+            receiver, sender, commands, ack_sender, poll_time, max_workers, walltime
+        )
+    finally:
+        ack_sender.close(linger=0)
+        context.term()
 
-    # --- Worker loop ---
-    worker_task(receiver, sender, commands, ack_sender, poll_time, max_workers, walltime)
+
+if __name__ == "__main__":
+    main()

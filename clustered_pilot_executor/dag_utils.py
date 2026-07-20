@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#O(n*m), onde n é o número de nós e m o número de arestas
+
+# O(n*m), onde n é o número de nós e m o número de arestas
 def load_graph(run_id, df):
     dag = nx.DiGraph()
     df_run = df[df["run_id"] == run_id]
-    df_run = df_run.sort_values(by=['task_id'], ascending=[True])
+    df_run = df_run.sort_values(by=["task_id"], ascending=[True])
 
     if df_run.empty:
         return None
@@ -23,7 +24,7 @@ def load_graph(run_id, df):
         task_func_name = r["task_func_name"]
         runtime = r["runtime_seconds"]
 
-        depends_on = str(r["task_depends"]).split(',')
+        depends_on = str(r["task_depends"]).split(",")
         depends_on = list(filter(lambda x: len(x) > 0, depends_on))
 
         dag.add_node(task_id, task_func_name=task_func_name, runtime=runtime)
@@ -48,10 +49,14 @@ def load_graph(run_id, df):
         dag.add_edge(t, -2)
 
     return dag
-    
+
 
 def load_most_similar_dag(old_dag, df, task_id, task_func_name):
-    if old_dag is not None and task_id in old_dag.nodes and old_dag.nodes[task_id]["task_func_name"] == task_func_name:
+    if (
+        old_dag is not None
+        and task_id in old_dag.nodes
+        and old_dag.nodes[task_id]["task_func_name"] == task_func_name
+    ):
         logger.info("Old DAG seems to be the most similar to the current task")
         return old_dag
 
@@ -59,24 +64,31 @@ def load_most_similar_dag(old_dag, df, task_id, task_func_name):
         logger.warning("No DAG dataframe (df) provided.")
         return old_dag
 
-    filtered_df = df[(df["task_id"] == task_id) & (df["task_func_name"] == task_func_name)]
+    filtered_df = df[
+        (df["task_id"] == task_id) & (df["task_func_name"] == task_func_name)
+    ]
     if filtered_df.empty:
         # logger.info("There is no DAG with the current task")
         return old_dag
     else:
-        filtered_df = filtered_df.drop_duplicates(subset=['task_id'])  # select only one of each task_id
+        filtered_df = filtered_df.drop_duplicates(
+            subset=["task_id"]
+        )  # select only one of each task_id
         # logger.info("Loading a new DAG")
         r = filtered_df.iloc[0]
         return load_graph(r["run_id"], df)
 
-        
 
 def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
     if db_path is None:
-        db_path = os.path.abspath(run_dir)
+        monitoring_db_file = os.path.join(os.path.abspath(run_dir), "monitoring.db")
+    else:
+        monitoring_db_file = os.path.abspath(db_path)
+        if os.path.isdir(monitoring_db_file):
+            monitoring_db_file = os.path.join(monitoring_db_file, "monitoring.db")
 
-    monitoring_db_file = os.path.join(db_path, "monitoring.db")
     if not os.path.exists(monitoring_db_file):
+        logger.warning("Monitoring database not found at %s", monitoring_db_file)
         return None
 
     try:
@@ -88,7 +100,7 @@ def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
                 SELECT task_id, run_id, task_func_name, task_depends
                 FROM task
                 """,
-                conn
+                conn,
             )
 
             # Status usado apenas para cálculo do runtime
@@ -97,67 +109,60 @@ def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
                 SELECT task_id, run_id, try_id, task_status_name, timestamp
                 FROM status
                 """,
-                conn
+                conn,
             )
 
-            status_df['timestamp'] = pd.to_datetime(
-                status_df['timestamp'], errors='coerce'
+            status_df["timestamp"] = pd.to_datetime(
+                status_df["timestamp"], errors="coerce"
             )
-            status_df = status_df.dropna(subset=['timestamp'])
+            status_df = status_df.dropna(subset=["timestamp"])
 
             # Seleciona a maior tentativa por tarefa
             max_try = (
-                status_df
-                .groupby(['task_id', 'run_id'])['try_id']
-                .max()
-                .reset_index()
+                status_df.groupby(["task_id", "run_id"])["try_id"].max().reset_index()
             )
 
             status_df = status_df.merge(
-                max_try,
-                on=['task_id', 'run_id', 'try_id'],
-                how='inner'
+                max_try, on=["task_id", "run_id", "try_id"], how="inner"
             )
 
             # Início e fim da execução
-            start_df = status_df[
-                status_df['task_status_name'] == 'running'
-            ][['task_id', 'run_id', 'timestamp']]
+            start_df = status_df[status_df["task_status_name"] == "running"][
+                ["task_id", "run_id", "timestamp"]
+            ]
 
             end_df = status_df[
-                status_df['task_status_name'].isin(['exec_done', 'completed'])
-            ][['task_id', 'run_id', 'timestamp']]
+                status_df["task_status_name"].isin(["exec_done", "completed"])
+            ][["task_id", "run_id", "timestamp"]]
 
             runtime_df = start_df.merge(
-                end_df,
-                on=['task_id', 'run_id'],
-                suffixes=('_start', '_end')
+                end_df, on=["task_id", "run_id"], suffixes=("_start", "_end")
             )
 
-            runtime_df['runtime_seconds'] = (
-                runtime_df['timestamp_end'] -
-                runtime_df['timestamp_start']
+            runtime_df["runtime_seconds"] = (
+                runtime_df["timestamp_end"] - runtime_df["timestamp_start"]
             ).dt.total_seconds()
 
-            runtime_df = runtime_df[runtime_df['runtime_seconds'] >= 0]
+            runtime_df = runtime_df[runtime_df["runtime_seconds"] >= 0]
 
             # Junta runtime com a query original
             final_df = task_df.merge(
-                runtime_df[['task_id', 'run_id', 'runtime_seconds']],
-                on=['task_id', 'run_id'],
-                how='inner'
+                runtime_df[["task_id", "run_id", "runtime_seconds"]],
+                on=["task_id", "run_id"],
+                how="inner",
             )
 
             return final_df
 
     except Exception as e:
-        logger.error(f"Erro ao carregar monitoring.db: {e}")
+        logger.error(f"Failed to load monitoring database: {e}")
         return None
+
 
 # def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
 #     df = None
 #     if db_path == None:
-#         db_path = os.path.abspath(run_dir) 
+#         db_path = os.path.abspath(run_dir)
 #     monitoring_db_file = os.path.join(db_path, "monitoring.db")
 #     if os.path.exists(monitoring_db_file):
 #         logger.debug("Monitoring.db found!")
@@ -175,53 +180,56 @@ def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
 #                     return df
 #         except:
 #             return None
-        
 
 
 # hierarchical layout drawing
-#Source: https://stackoverflow.com/questions/29586520/can-one-get-hierarchical-graphs-from-networkx-with-python-3
-def hierarchy_pos(G, root, levels=None, width=1., height=1.):
-    '''If there is a cycle that is reachable from root, then this will see infinite recursion.
-       G: the graph
-       root: the root node
-       levels: a dictionary
-               key: level number (starting from 0)
-               value: number of nodes in this level
-       width: horizontal space allocated for drawing
-       height: vertical space allocated for drawing'''
+# Source: https://stackoverflow.com/questions/29586520/can-one-get-hierarchical-graphs-from-networkx-with-python-3
+def hierarchy_pos(G, root, levels=None, width=1.0, height=1.0):
+    """If there is a cycle that is reachable from root, then this will see infinite recursion.
+    G: the graph
+    root: the root node
+    levels: a dictionary
+            key: level number (starting from 0)
+            value: number of nodes in this level
+    width: horizontal space allocated for drawing
+    height: vertical space allocated for drawing"""
     TOTAL = "total"
     CURRENT = "current"
+
     def make_levels(levels, node=root, currentLevel=0, parent=None):
-        """Compute the number of nodes for each level
-        """
+        """Compute the number of nodes for each level"""
         if not currentLevel in levels:
-            levels[currentLevel] = {TOTAL : 0, CURRENT : 0}
+            levels[currentLevel] = {TOTAL: 0, CURRENT: 0}
         levels[currentLevel][TOTAL] += 1
         neighbors = G.neighbors(node)
         for neighbor in neighbors:
             if not neighbor == parent:
-                levels =  make_levels(levels, neighbor, currentLevel + 1, node)
+                levels = make_levels(levels, neighbor, currentLevel + 1, node)
         return levels
 
     def make_pos(pos, node=root, currentLevel=0, parent=None, vert_loc=0):
-        dx = 1/levels[currentLevel][TOTAL]
-        left = dx/2
-        pos[node] = ((left + dx*levels[currentLevel][CURRENT])*width, vert_loc)
+        dx = 1 / levels[currentLevel][TOTAL]
+        left = dx / 2
+        pos[node] = ((left + dx * levels[currentLevel][CURRENT]) * width, vert_loc)
         levels[currentLevel][CURRENT] += 1
         neighbors = G.neighbors(node)
         for neighbor in neighbors:
             if not neighbor == parent:
-                pos = make_pos(pos, neighbor, currentLevel + 1, node, vert_loc-vert_gap)
+                pos = make_pos(
+                    pos, neighbor, currentLevel + 1, node, vert_loc - vert_gap
+                )
         return pos
+
     if levels is None:
         levels = make_levels({})
     else:
-        levels = {l:{TOTAL: levels[l], CURRENT:0} for l in levels}
-    vert_gap = height / (max([l for l in levels])+1)
+        levels = {l: {TOTAL: levels[l], CURRENT: 0} for l in levels}
+    vert_gap = height / (max([l for l in levels]) + 1)
     return make_pos({})
 
+
 def draw_dag(dag, dir):
-    pos = hierarchy_pos(dag, root = 0)
+    pos = hierarchy_pos(dag, root=0)
     fig, ax = plt.subplots()
     nx.draw_networkx(dag, pos=pos, ax=ax)
     ax.set_title("DAG layout in topological order")
