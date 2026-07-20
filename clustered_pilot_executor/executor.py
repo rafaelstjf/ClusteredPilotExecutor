@@ -74,7 +74,6 @@ class ClusteredPilotExecutor(ParslExecutor):
             clustering_alg: Optional[ClusteringAlgorithm] = ClusteringAlgorithm.FIFO,
             allow_tasks: Optional[bool] = False,
             monitoring_db_path: str = "./runinfo/monitoring.db",
-            use_monitoring_history: bool = True,
             job_status_initial_delay: float = 5.0,
             job_status_poll_interval: float = 10.0
     ):
@@ -98,14 +97,13 @@ class ClusteredPilotExecutor(ParslExecutor):
         self.process_timeout = process_timeout  # Used to reset the timer
         self.allow_tasks = allow_tasks
         self.monitoring_db_path = monitoring_db_path
-        self.use_monitoring_history = use_monitoring_history
         self.job_status_initial_delay = job_status_initial_delay
         self.job_status_poll_interval = job_status_poll_interval
 
         # --- ZMQ Context ---
         self.context = zmq.Context()
 
-        # --- Socket para enviar tarefas aos workers ---
+        # --- Socket to send tasks to workers ---
         self.send_task_socket = self.context.socket(zmq.PUSH)
         self.push_port = self.send_task_socket.bind_to_random_port(
             f"tcp://{self.address}",
@@ -114,7 +112,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             max_tries=100
         )
 
-        # --- Socket para receber resultados dos workers ---
+        # --- Socket to receive results from workers ---
         self.receive_task_socket = self.context.socket(zmq.PULL)
         self.pull_port = self.receive_task_socket.bind_to_random_port(
             f"tcp://{self.address}",
@@ -123,7 +121,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             max_tries=100
         )
 
-        # --- Socket para receber o priming handshake (READY) ---
+        # --- Socket to receive the priming handshake (READY) ---
         self.ack_socket = self.context.socket(zmq.PULL)
         self.ack_port = self.ack_socket.bind_to_random_port(
             f"tcp://{self.address}",
@@ -132,7 +130,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             max_tries=100
         )
 
-        # PUB -> workers (comandos, p.ex. stop)
+        # PUB -> workers (commands, p.ex. stop)
         self.cmd_socket = self.context.socket(zmq.PUB)
         self.cmd_port = self.cmd_socket.bind_to_random_port(
             f"tcp://{self.address}",
@@ -160,7 +158,6 @@ class ClusteredPilotExecutor(ParslExecutor):
         self.job_monitoring_thread = None
         self.current_jobs = list()
         self.stop_event = Event()
-
 
     def __validate_provider(self, provider: ExecutionProvider) -> None:
         """Validate provider attributes required by the SLURM pilot-job workflow."""
@@ -372,11 +369,9 @@ class ClusteredPilotExecutor(ParslExecutor):
             cores = os.cpu_count()
             cores_old = cores
         logger.debug("Trying to load monitoring database.")
-        df = None
-        if self.use_monitoring_history:
-            df = load_tasks_from_db(self.monitoring_db_path)
-            if df is None and self.clustering_alg in TIME_ESTIMATE_ALGORITHMS:
-                logger.warning("Monitoring history is unavailable or unreliable at %s; falling back to FIFO for %s.", self.monitoring_db_path, self.clustering_alg.name)
+        df = load_tasks_from_db(self.monitoring_db_path)
+        if df is None and self.clustering_alg in TIME_ESTIMATE_ALGORITHMS:
+            logger.warning("Monitoring history is unavailable or unreliable at %s; falling back to FIFO for %s.", self.monitoring_db_path, self.clustering_alg.name)
         elif self.clustering_alg in TIME_ESTIMATE_ALGORITHMS:
             logger.warning("Monitoring history is disabled; falling back to FIFO for %s.", self.clustering_alg.name)
         with self.lock:
