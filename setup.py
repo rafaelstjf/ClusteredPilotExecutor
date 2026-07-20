@@ -1,24 +1,24 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 setup(
     name="clustered-pilot-executor",
     version="0.1.0",
-    description="ClusteredPilotExecutor for Parsl: supports pilot jobs, clustering, and dynamic task submission.",
+    description="ClusteredPilotExecutor for Parsl: pilot jobs, clustering, and dynamic task submission.",
     author="Rafael Terra",
     author_email="rafaelstjf@gmail.com",
     packages=find_packages(),
     install_requires=[
-        "parsl>=1.2",   # adjust to your Parsl version
+        "parsl",
         "pyzmq",
-        "networkx",
         "pandas",
-        "matplotlib"
+        "networkx",
+        "matplotlib",
     ],
     entry_points={
-        'console_scripts': [
-            'adaptive_worker=adaptive_executor.worker:main',
+        "console_scripts": [
+            "cpe-worker=parsl.executors.clustered_pilot_executor.worker:main",
         ],
     },
-    python_requires='>=3.8',
+    python_requires=">=3.8",
     include_package_data=True,
 )

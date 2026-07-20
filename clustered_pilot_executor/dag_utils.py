@@ -73,10 +73,14 @@ def load_most_similar_dag(old_dag, df, task_id, task_func_name):
 
 def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
     if db_path is None:
-        db_path = os.path.abspath(run_dir)
+        monitoring_db_file = os.path.join(os.path.abspath(run_dir), "monitoring.db")
+    else:
+        monitoring_db_file = os.path.abspath(db_path)
+        if os.path.isdir(monitoring_db_file):
+            monitoring_db_file = os.path.join(monitoring_db_file, "monitoring.db")
 
-    monitoring_db_file = os.path.join(db_path, "monitoring.db")
     if not os.path.exists(monitoring_db_file):
+        logger.warning("Monitoring database not found at %s", monitoring_db_file)
         return None
 
     try:
@@ -151,7 +155,7 @@ def load_tasks_from_db(db_path=None, run_dir="./runinfo"):
             return final_df
 
     except Exception as e:
-        logger.error(f"Erro ao carregar monitoring.db: {e}")
+        logger.error(f"Failed to load monitoring database: {e}")
         return None
 
 # def load_tasks_from_db(db_path = None, run_dir = "./runinfo"):
