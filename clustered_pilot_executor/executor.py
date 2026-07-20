@@ -17,7 +17,10 @@ from parsl.addresses import address_by_hostname
 from parsl.providers.base import ExecutionProvider
 from parsl.providers import SlurmProvider
 from parsl.jobs.states import JobState
-from parsl.executors.clustered_pilot_executor.dag_utils import load_tasks_from_db, load_most_similar_dag
+from parsl.executors.clustered_pilot_executor.dag_utils import (
+    load_tasks_from_db,
+    load_most_similar_dag,
+)
 from parsl.executors.clustered_pilot_executor.sched_algorithms import (
     fifo,
     lifo,
@@ -64,18 +67,18 @@ class ClusteredPilotExecutor(ParslExecutor):
     radio_mode: str = "filesystem"
 
     def __init__(
-            self,
-            label: str = "ClusteredPilotExecutor",
-            provider: ExecutionProvider = SlurmProvider(),
-            port_range: Optional[Tuple[int, int]] = (55000, 56000),
-            address: Optional[str] = address_by_hostname(),
-            process_timeout: Optional[int] = 3,
-            working_dir: Optional[str] = None,
-            clustering_alg: Optional[ClusteringAlgorithm] = ClusteringAlgorithm.FIFO,
-            allow_tasks: Optional[bool] = False,
-            monitoring_db_path: str = "./runinfo/monitoring.db",
-            job_status_initial_delay: float = 5.0,
-            job_status_poll_interval: float = 10.0
+        self,
+        label: str = "ClusteredPilotExecutor",
+        provider: ExecutionProvider = SlurmProvider(),
+        port_range: Optional[Tuple[int, int]] = (55000, 56000),
+        address: Optional[str] = address_by_hostname(),
+        process_timeout: Optional[int] = 3,
+        working_dir: Optional[str] = None,
+        clustering_alg: Optional[ClusteringAlgorithm] = ClusteringAlgorithm.FIFO,
+        allow_tasks: Optional[bool] = False,
+        monitoring_db_path: str = "./runinfo/monitoring.db",
+        job_status_initial_delay: float = 5.0,
+        job_status_poll_interval: float = 10.0,
     ):
         super().__init__()
 
@@ -109,7 +112,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             f"tcp://{self.address}",
             min_port=self.port_range[0],
             max_port=self.port_range[1],
-            max_tries=100
+            max_tries=100,
         )
 
         # --- Socket to receive results from workers ---
@@ -118,7 +121,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             f"tcp://{self.address}",
             min_port=self.port_range[0],
             max_port=self.port_range[1],
-            max_tries=100
+            max_tries=100,
         )
 
         # --- Socket to receive the priming handshake (READY) ---
@@ -127,7 +130,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             f"tcp://{self.address}",
             min_port=self.port_range[0],
             max_port=self.port_range[1],
-            max_tries=100
+            max_tries=100,
         )
 
         # PUB -> workers (commands, p.ex. stop)
@@ -136,7 +139,7 @@ class ClusteredPilotExecutor(ParslExecutor):
             f"tcp://{self.address}",
             min_port=self.port_range[0],
             max_port=self.port_range[1],
-            max_tries=100
+            max_tries=100,
         )
 
         # Internal variables
@@ -162,23 +165,40 @@ class ClusteredPilotExecutor(ParslExecutor):
     def __validate_provider(self, provider: ExecutionProvider) -> None:
         """Validate provider attributes required by the SLURM pilot-job workflow."""
         if not isinstance(provider, SlurmProvider):
-            raise TypeError("ClusteredPilotExecutor currently requires a Parsl SlurmProvider.")
-        required = ["nodes_per_block", "cores_per_node", "walltime", "submit", "status", "cancel"]
+            raise TypeError(
+                "ClusteredPilotExecutor currently requires a Parsl SlurmProvider."
+            )
+        required = [
+            "nodes_per_block",
+            "cores_per_node",
+            "walltime",
+            "submit",
+            "status",
+            "cancel",
+        ]
         missing = [name for name in required if not hasattr(provider, name)]
         if missing:
-            raise ValueError(f"SlurmProvider is missing required attributes: {', '.join(missing)}")
+            raise ValueError(
+                f"SlurmProvider is missing required attributes: {', '.join(missing)}"
+            )
 
     def __safe_set_future_result(self, task_id: int, result: Any) -> None:
         future = self.future_tasks.get(task_id)
         if future is None or future.cancelled() or future.done():
-            logger.warning("Ignoring result for task %s because its Future is already complete or missing.", task_id)
+            logger.warning(
+                "Ignoring result for task %s because its Future is already complete or missing.",
+                task_id,
+            )
             return
         future.set_result(result)
 
     def __safe_set_future_exception(self, task_id: int, exc: Exception) -> None:
         future = self.future_tasks.get(task_id)
         if future is None or future.cancelled() or future.done():
-            logger.warning("Ignoring exception for task %s because its Future is already complete or missing.", task_id)
+            logger.warning(
+                "Ignoring exception for task %s because its Future is already complete or missing.",
+                task_id,
+            )
             return
         future.set_exception(exc)
 
@@ -201,8 +221,9 @@ class ClusteredPilotExecutor(ParslExecutor):
         else:
             logger.debug("Failed to confirm STOP Reception")
 
-
-    def __wait_for_workers(self, expected_workers: int, timeout_ms: int = 60_000, msg: str = "READY") -> bool:
+    def __wait_for_workers(
+        self, expected_workers: int, timeout_ms: int = 60_000, msg: str = "READY"
+    ) -> bool:
         """Waits for READY messages from the workers before sending tasks."""
 
         logger.debug(f"Awaiting READY from {expected_workers} workers...")
@@ -245,7 +266,8 @@ class ClusteredPilotExecutor(ParslExecutor):
 
             if not self.__wait_for_workers(expected):
                 logger.error(
-                    "Could not validate worker readiness. Tasks returned to queue.")
+                    "Could not validate worker readiness. Tasks returned to queue."
+                )
                 with self.lock:
                     for t in cluster:
                         self.queue.append(t)
@@ -253,21 +275,25 @@ class ClusteredPilotExecutor(ParslExecutor):
         for c in cluster:
             try:
                 # Pack the function and arguments for execution
-                task_data = pack_apply_message(
-                    c["func"], c["args"], c["kwargs"])
+                task_data = pack_apply_message(c["func"], c["args"], c["kwargs"])
                 # Combine task ID with the packed task data
                 task_metadata = pickle.dumps((c["task_id"], task_data))
                 # Send the metadata to the worker
                 logger.info(f"Task {c['task_id']} sent to worker")
-                self.tasks[c['task_id']] = {"status": "sent"}
+                self.tasks[c["task_id"]] = {"status": "sent"}
                 self.send_task_socket.send(task_metadata)
                 logger.info(f"Waiting for completition")
             except Exception as e:
                 logger.error(f"Failed to send task {c['task_id']}: {e}")
-                self.tasks[c['task_id']] = {"status": "error"}
+                self.tasks[c["task_id"]] = {"status": "error"}
                 # Set the exception and let the DKF deal with the failed task
-                self.__safe_set_future_exception(c['task_id'], SerializationError(c["func"]))
-        if self.allow_tasks == False or self.clustering_alg in [ClusteringAlgorithm.FIFO, ClusteringAlgorithm.LIFO]:
+                self.__safe_set_future_exception(
+                    c["task_id"], SerializationError(c["func"])
+                )
+        if self.allow_tasks == False or self.clustering_alg in [
+            ClusteringAlgorithm.FIFO,
+            ClusteringAlgorithm.LIFO,
+        ]:
             self.__send_stop_to_all()
 
     def __receive_tasks(self) -> None:
@@ -287,13 +313,13 @@ class ClusteredPilotExecutor(ParslExecutor):
                     if error is None:
                         with self.lock:
                             logger.info(
-                                f"Task {task_id} completed successfully with result: {result}")
+                                f"Task {task_id} completed successfully with result: {result}"
+                            )
                             self.tasks[task_id]["status"] = "success"
                             self.__safe_set_future_result(task_id, result)
                     else:
                         with self.lock:
-                            logger.error(
-                                f"Task {task_id} failed with error: {error}")
+                            logger.error(f"Task {task_id} failed with error: {error}")
                             self.tasks[task_id]["status"] = "error"
                             # Set the exception and let the DKF deal with the failed task
                             self.__safe_set_future_exception(task_id, Exception(error))
@@ -318,13 +344,17 @@ class ClusteredPilotExecutor(ParslExecutor):
             with self.lock:
                 has_jobs = len(self.current_jobs) > 0
             logger.debug(
-                f"Monitoring jobs. Total of current jobs: {len(self.current_jobs)}")
+                f"Monitoring jobs. Total of current jobs: {len(self.current_jobs)}"
+            )
             logger.debug(f"Processing a queue of {len(self.queue)} tasks")
             if has_jobs:
                 jobs_to_remove = list()
                 states = self.provider.status(self.current_jobs)
                 for i in range(0, len(states)):
-                    if states[i].state != JobState.RUNNING and states[i].state != JobState.PENDING:
+                    if (
+                        states[i].state != JobState.RUNNING
+                        and states[i].state != JobState.PENDING
+                    ):
                         jobs_to_remove.append(self.current_jobs[i])
                 if len(jobs_to_remove) > 0:
                     with self.lock:
@@ -337,52 +367,66 @@ class ClusteredPilotExecutor(ParslExecutor):
                         for id in self.tasks.keys():
                             if self.tasks[id]["status"] == "sent":
                                 logger.error(
-                                    f"Task {id} failed due to job execution time exceeded!")
+                                    f"Task {id} failed due to job execution time exceeded!"
+                                )
 
                                 # Set the exception and let the DKF deal with the failed task
                                 self.tasks[id]["status"] = "error"
-                                self.__safe_set_future_exception(id, ValueError("Task didn't receive a result"))
+                                self.__safe_set_future_exception(
+                                    id, ValueError("Task didn't receive a result")
+                                )
             if self.stop_event.wait(self.job_mon_interval):
                 break
 
     def __process_queue(self) -> None:
         """Process tasks in the queue when the timer reaches zero and
-            if the number of concurrent jobs is under the threshold
+        if the number of concurrent jobs is under the threshold
         """
         if len(self.queue) == 0:
             return
         with self.lock:  # keeping this locker to avoid refactoring when we use multiple jobs
-            if (len(self.current_jobs) == self.max_jobs):
-                if self.clustering_alg in [ClusteringAlgorithm.FIFO, ClusteringAlgorithm.LIFO] or self.allow_tasks == False:
+            if len(self.current_jobs) == self.max_jobs:
+                if (
+                    self.clustering_alg
+                    in [ClusteringAlgorithm.FIFO, ClusteringAlgorithm.LIFO]
+                    or self.allow_tasks == False
+                ):
                     return  # Forces FIFO to be submitted in new jobs, even though allow tasks is true
         if isinstance(self.provider, SlurmProvider):
             # Get the walltime in seconds
-            datetime_obj = datetime.strptime(
-                self.provider.walltime, "%H:%M:%S")
+            datetime_obj = datetime.strptime(self.provider.walltime, "%H:%M:%S")
             walltime_delta = timedelta(
-                hours=datetime_obj.hour, minutes=datetime_obj.minute, seconds=datetime_obj.second)
+                hours=datetime_obj.hour,
+                minutes=datetime_obj.minute,
+                seconds=datetime_obj.second,
+            )
             walltime = walltime_delta.total_seconds()
             cores_old = self.provider.cores_per_node
             cores = self.provider.cores_per_node * self.provider.nodes_per_block
         else:
-            walltime = int('inf')
+            walltime = int("inf")
             cores = os.cpu_count()
             cores_old = cores
         logger.debug("Trying to load monitoring database.")
         df = load_tasks_from_db(self.monitoring_db_path)
         if df is None and self.clustering_alg in TIME_ESTIMATE_ALGORITHMS:
-            logger.warning("Monitoring history is unavailable or unreliable at %s; falling back to FIFO for %s.", self.monitoring_db_path, self.clustering_alg.name)
+            logger.warning(
+                "Monitoring history is unavailable or unreliable at %s; falling back to FIFO for %s.",
+                self.monitoring_db_path,
+                self.clustering_alg.name,
+            )
         elif self.clustering_alg in TIME_ESTIMATE_ALGORITHMS:
-            logger.warning("Monitoring history is disabled; falling back to FIFO for %s.", self.clustering_alg.name)
+            logger.warning(
+                "Monitoring history is disabled; falling back to FIFO for %s.",
+                self.clustering_alg.name,
+            )
         with self.lock:
             if len(self.current_jobs) == self.max_jobs:
                 # If the executor is submitting tasks in a running job, calculate the new walltime
                 REDU_FACT = 0.9
-                time_diff = int(time.time() -
-                                self.job_start_time)
-                walltime = (walltime - time_diff)*REDU_FACT
-                logger.debug(
-                    f"Walltime for the running job: {walltime} seconds")
+                time_diff = int(time.time() - self.job_start_time)
+                walltime = (walltime - time_diff) * REDU_FACT
+                logger.debug(f"Walltime for the running job: {walltime} seconds")
             # ------------------------------
             # creates a copy of the current queue
             queue_copy = list(self.queue)
@@ -397,31 +441,39 @@ class ClusteredPilotExecutor(ParslExecutor):
         for i, t in enumerate(self.queue):
             tasks_name += f"{t['func'].__name__}"
             self.dag = load_most_similar_dag(
-                self.dag, df, t["task_id"], t["func"].__name__)
-            if i < len(self.queue)-1:
+                self.dag, df, t["task_id"], t["func"].__name__
+            )
+            if i < len(self.queue) - 1:
                 tasks_name += ", "
         tasks_name += "]"
         logger.debug(f"{tasks_name}")
-        algorithm = self.clustering_alg if isinstance(self.clustering_alg, ClusteringAlgorithm) else ClusteringAlgorithm.FIFO
+        algorithm = (
+            self.clustering_alg
+            if isinstance(self.clustering_alg, ClusteringAlgorithm)
+            else ClusteringAlgorithm.FIFO
+        )
         if algorithm in TIME_ESTIMATE_ALGORITHMS and df is None:
             algorithm = ClusteringAlgorithm.FIFO
         scheduler = ALGORITHM_MAP.get(algorithm, fifo)
         if algorithm == ClusteringAlgorithm.GUR:
             cluster, remaining_queue = scheduler(self.dag, walltime, cores, queue_copy)
-        elif algorithm in {ClusteringAlgorithm.SJF, ClusteringAlgorithm.LJF, ClusteringAlgorithm.LJFU}:
+        elif algorithm in {
+            ClusteringAlgorithm.SJF,
+            ClusteringAlgorithm.LJF,
+            ClusteringAlgorithm.LJFU,
+        }:
             cluster, remaining_queue = scheduler(walltime, cores, df, queue_copy)
         else:
             cluster, remaining_queue = scheduler(walltime, cores, queue_copy)
 
         with self.lock:
             if len(cluster) == 0 and len(self.current_jobs) < self.max_jobs:  # type: ignore
-                logger.warning(
-                    "No task was added to the cluster, defaulting to FIFO!")
+                logger.warning("No task was added to the cluster, defaulting to FIFO!")
                 cluster, remaining_queue = fifo(walltime, cores, queue_copy)
         tasks_name = "Tasks in the cluster: ["
         for i, t in enumerate(cluster):
             tasks_name += f"{t['func'].__name__}"
-            if i < len(cluster)-1:
+            if i < len(cluster) - 1:
                 tasks_name += ", "
         tasks_name += "]"
         logger.debug(f"Processing a cluster of {len(cluster)} tasks")
@@ -429,43 +481,64 @@ class ClusteredPilotExecutor(ParslExecutor):
 
         processed_ids = set(t["task_id"] for t in cluster)
         with self.lock:
-            self.queue = [t for t in self.queue if t["task_id"]
-                          not in processed_ids]
+            self.queue = [t for t in self.queue if t["task_id"] not in processed_ids]
             cur_jobs = len(self.current_jobs)
         if cur_jobs < self.max_jobs:  # type: ignore
-            sub_thread = Thread(target=self.__submit_slurm_job,
-                                args=(cluster, cores_old,walltime,), daemon=True)
+            sub_thread = Thread(
+                target=self.__submit_slurm_job,
+                args=(
+                    cluster,
+                    cores_old,
+                    walltime,
+                ),
+                daemon=True,
+            )
             sub_thread.start()
         else:
             if len(cluster) > 0:
-                send_thread = Thread(target=self.__send_tasks,
-                                    args=(cluster, False,), daemon=True)
+                send_thread = Thread(
+                    target=self.__send_tasks,
+                    args=(
+                        cluster,
+                        False,
+                    ),
+                    daemon=True,
+                )
                 send_thread.start()  # Start the task-sending thread
             elif all(t["status"] != "sent" for t in self.tasks.values()):
-                #TODO add stop command
+                # TODO add stop command
                 self.__send_stop_to_all()
 
-
-    def __submit_slurm_job(self, cluster: list, max_workers: int, walltime=float) -> None:
+    def __submit_slurm_job(
+        self, cluster: list, max_workers: int, walltime=float
+    ) -> None:
         """Submit the tasks as a job to SLURM.
-        TODO: 
+        TODO:
             - Each worker needs to have its own address
             - Support multiple jobs
         """
         # Submit the SLURM job
         with self.lock:
             logger.debug(
-                "-------------------------INSIDE the submit job function-------------------------")
+                "-------------------------INSIDE the submit job function-------------------------"
+            )
             if len(self.current_jobs) == self.max_jobs:
                 return
-            launch_cmd = DEFAULT_LAUNCH_CMD.format(hostname=self.address, pull_port=self.pull_port,
-                                                   push_port=self.push_port, ack_port=self.ack_port, cmd_port=self.cmd_port, poll_time=1, max_workers=max_workers, walltime=walltime)
+            launch_cmd = DEFAULT_LAUNCH_CMD.format(
+                hostname=self.address,
+                pull_port=self.pull_port,
+                push_port=self.push_port,
+                ack_port=self.ack_port,
+                cmd_port=self.cmd_port,
+                poll_time=1,
+                max_workers=max_workers,
+                walltime=walltime,
+            )
             logger.debug(launch_cmd)
             job_id = self.provider.submit(launch_cmd, 1)
             if not job_id:
                 logger.error(f"Failed to submit SLURM job")
-                raise RuntimeError(
-                    "SLURM job submission returned empty job_id")
+                raise RuntimeError("SLURM job submission returned empty job_id")
             else:
                 self.current_jobs.append(job_id)
 
@@ -473,16 +546,21 @@ class ClusteredPilotExecutor(ParslExecutor):
         status = JobState.PENDING
         # Give SLURM/provider a short, interruptible interval to register the submission.
         if self.stop_event.wait(self.job_status_initial_delay):
-            logger.info("Stopping job submission monitor for %s during shutdown", job_id)
+            logger.info(
+                "Stopping job submission monitor for %s during shutdown", job_id
+            )
             return
         # while status == JobState.PENDING and (time.time() - start_time) < max_wait_time:
-        while status == JobState.PENDING and not self.stop_event.is_set():  # Maximum waiting time removed, because the queue is really large in SDumont. Hence, it's difficult to tell how long it will take to the job start running
+        while (
+            status == JobState.PENDING and not self.stop_event.is_set()
+        ):  # Maximum waiting time removed, because the queue is really large in SDumont. Hence, it's difficult to tell how long it will take to the job start running
             status = self.provider.status([job_id])[0].state
             if status == JobState.RUNNING:
                 self.job_start_time = time.time()
                 logger.debug("Starting the send_tasks thread")
                 send_thread = Thread(
-                    target=self.__send_tasks, args=(cluster,), daemon=True)
+                    target=self.__send_tasks, args=(cluster,), daemon=True
+                )
                 send_thread.start()  # Start the task-sending thread
                 break
             elif status == JobState.FAILED:
@@ -503,7 +581,9 @@ class ClusteredPilotExecutor(ParslExecutor):
                 logger.debug(f"Unknown status for job {job_id} - {status}")
                 status = JobState.PENDING
             if self.stop_event.wait(self.job_status_poll_interval):
-                logger.info("Stopping job status polling for %s during shutdown", job_id)
+                logger.info(
+                    "Stopping job status polling for %s during shutdown", job_id
+                )
                 return
 
     def start(self) -> None:
@@ -526,7 +606,9 @@ class ClusteredPilotExecutor(ParslExecutor):
         self.job_monitoring_thread = Thread(target=self.__monitor_jobs, daemon=False)
         self.job_monitoring_thread.start()
 
-    def submit(self, func: Callable, resource_specification: dict, *args: Any, **kwargs: Any) -> Future:
+    def submit(
+        self, func: Callable, resource_specification: dict, *args: Any, **kwargs: Any
+    ) -> Future:
         """Submit a task to the executor."""
         logger.info("Submitting task")
         # TODO: Check if with the resource especification there is need to correct the args
@@ -535,19 +617,23 @@ class ClusteredPilotExecutor(ParslExecutor):
         with self.lock:
             task_id = self.launched_tasks
             self.launched_tasks += 1
-            self.tasks[task_id] = {'status': 'queued'}
-            self.queue.append({
-                "task_id": task_id,
-                "func": func,
-                "args": args,
-                "kwargs": kwargs
-            })
+            self.tasks[task_id] = {"status": "queued"}
+            self.queue.append(
+                {"task_id": task_id, "func": func, "args": args, "kwargs": kwargs}
+            )
             self.timer = self.process_timeout
         self.future_tasks[task_id] = Future()
         self.future_tasks[task_id].set_running_or_notify_cancel()
         self.future_tasks[task_id].parsl_executor_task_id = task_id
 
-        logger.info("Clustering algorithm chosen %s", self.clustering_alg.name if isinstance(self.clustering_alg, ClusteringAlgorithm) else self.clustering_alg)
+        logger.info(
+            "Clustering algorithm chosen %s",
+            (
+                self.clustering_alg.name
+                if isinstance(self.clustering_alg, ClusteringAlgorithm)
+                else self.clustering_alg
+            ),
+        )
         return self.future_tasks[task_id]
 
     def shutdown(self) -> None:
@@ -564,16 +650,26 @@ class ClusteredPilotExecutor(ParslExecutor):
 
         for task_id, task_state in tasks_copy.items():
             if task_state["status"] in ["sent", "queued"]:
-                self.__safe_set_future_exception(task_id, ValueError("Task failed unexpectedly"))
+                self.__safe_set_future_exception(
+                    task_id, ValueError("Task failed unexpectedly")
+                )
 
-        for socket in (self.send_task_socket, self.receive_task_socket, self.ack_socket, self.cmd_socket):
+        for socket in (
+            self.send_task_socket,
+            self.receive_task_socket,
+            self.ack_socket,
+            self.cmd_socket,
+        ):
             socket.close(linger=0)
         self.context.term()
 
         # Stopping the non-daemon threads after sockets are closed to unblock pollers.
-        for thread in (self.rcv_tasks_thread, self.timer_thread, self.job_monitoring_thread):
+        for thread in (
+            self.rcv_tasks_thread,
+            self.timer_thread,
+            self.job_monitoring_thread,
+        ):
             if thread is not None:
                 thread.join(timeout=10)
 
-        logger.info(
-            "All tasks have been completed or interrupted. Executor stopped.")
+        logger.info("All tasks have been completed or interrupted. Executor stopped.")

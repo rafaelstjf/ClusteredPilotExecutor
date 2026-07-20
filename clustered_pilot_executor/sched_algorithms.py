@@ -159,7 +159,10 @@ def greedy_upward_rank(dag, walltime, cores, queue):
 
     rank.sort(key=lambda x: x[1], reverse=True)
     task_ids_to_keep = [task_id for task_id, _ in rank[:cores]]
-    cluster = [next(task for task in queue if task["task_id"] == tid) for tid in task_ids_to_keep]
+    cluster = [
+        next(task for task in queue if task["task_id"] == tid)
+        for tid in task_ids_to_keep
+    ]
     queue = [task for task in queue if task["task_id"] not in task_ids_to_keep]
     return cluster, queue
 
@@ -187,7 +190,9 @@ def _runtime_greedy(walltime, cores, db, queue, shortest: bool = False):
         task_name = task["func"].__name__
         estimate = estimate_runtime(db, task_name)
         if estimate.number_of_samples == 0:
-            logger.warning("No runtime samples for task %s; falling back to FIFO.", task_name)
+            logger.warning(
+                "No runtime samples for task %s; falling back to FIFO.", task_name
+            )
             return fifo(walltime, cores, queue)
         candidates.append((task, estimate))
         logger.debug(
