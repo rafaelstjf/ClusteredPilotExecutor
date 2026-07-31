@@ -48,27 +48,7 @@ The current implementation targets workflows composed mainly of `bash_app` tasks
 
 ## Installation
 
-### 0. Install Parsl library in editable mode
-
-```bash
-git clone https://github.com/Parsl/parsl.git
-cd parsl
-pip install -e .
-```
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/<username>/ClusteredParslExecutor.git
-cd ClusteredParslExecutor
-```
-
-### 2. Install in editable mode
-
-```bash
-pip install -e .
-```
-
-### 2. Create and activate a Python environment
+### 0. Create and activate a Python environment
 
 Using venv:
 
@@ -83,23 +63,27 @@ conda create -n cpe python=3.10
 conda activate cpe
 ```
 
-### 3. Install Parsl
+### 1. Install Parsl library in editable mode
 
-Install Parsl in the same Python environment:
-
+```bash
+git clone https://github.com/Parsl/parsl.git
+cd parsl
+pip install -e .
 ```
-pip install parsl
+### 2. Clone the repository
+
+```bash
+git clone https://github.com/<username>/ClusteredParslExecutor.git
+cd ClusteredParslExecutor
 ```
 
-### 4. Install ClusteredPilotExecutor as an external package
+### 3. Install in editable mode
 
-For development installation:
-
-```
+```bash
 pip install -e .
 ```
 
-### 5. Import the executor
+### 4. Import the executor
 
 After installation, the executor should be imported directly from the external package:
 
@@ -117,7 +101,7 @@ or:
 from parsl.executors.adaptive_executor.executor import ClusteredPilotExecut
 
 ---
-Alternatively, for development and testing purposes, you can create a symbolic link inside the Parsl executors directory. This allows the executor to be imported from the Parsl namespace.
+Alternatively, **for development and testing purposes**, you can create a symbolic link inside the Parsl executors directory. This allows the executor to be imported from the Parsl namespace.
 
 To do this, go to the Parsl executors directory:
 
