@@ -277,7 +277,9 @@ class ClusteredPilotExecutor(ParslExecutor):
                 # Pack the function and arguments for execution
                 task_data = pack_apply_message(c["func"], c["args"], c["kwargs"])
                 # Combine task ID with the packed task data
-                task_metadata = pickle.dumps((c["task_id"], task_data))
+                task_metadata = pickle.dumps(
+                    (c["task_id"], task_data, c["cores"])
+                )
                 # Send the metadata to the worker
                 logger.info(f"Task {c['task_id']} sent to worker")
                 self.tasks[c["task_id"]] = {"status": "sent"}
@@ -611,6 +613,16 @@ class ClusteredPilotExecutor(ParslExecutor):
     ) -> Future:
         """Submit a task to the executor."""
         logger.info("Submitting task")
+        cores = resource_specification.get(
+            "cores",
+            resource_specification.get("required_cpus", 1),
+        )
+        try:
+            cores = int(cores)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("cores must be an integer") from exc
+        if cores <= 0:
+            raise ValueError("cores must be greater than zero")
         # TODO: Check if with the resource especification there is need to correct the args
         # args, kwargs = self.__correct_args(args, kwargs)
         # Reset timer each time a new task is added
@@ -619,7 +631,13 @@ class ClusteredPilotExecutor(ParslExecutor):
             self.launched_tasks += 1
             self.tasks[task_id] = {"status": "queued"}
             self.queue.append(
-                {"task_id": task_id, "func": func, "args": args, "kwargs": kwargs}
+                {
+                    "task_id": task_id,
+                    "func": func,
+                    "args": args,
+                    "kwargs": kwargs,
+                    "cores": cores,
+                }
             )
             self.timer = self.process_timeout
         self.future_tasks[task_id] = Future()
